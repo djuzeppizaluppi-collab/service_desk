@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Рабочие группы — Админ{% endblock %}
+{% block content %}
+<div class="page-admin">
+  <div class="page-header">
+    <h1 class="page-title"><i data-feather="layers"></i> Рабочие группы</h1>
+    <button class="btn btn-primary" id="addWgBtn">
+      <i data-feather="plus"></i> Добавить
+    </button>
+  </div>
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead><tr><th>Название</th><th>Описание</th><th>Статус</th><th></th></tr></thead>
+      <tbody>
+        {% for wg in groups %}
+        <tr>
+          <td><strong>{{ wg.group_name }}</strong></td>
+          <td>{{ wg.group_description or '—' }}</td>
+          <td>
+            {% if wg.isactive %}
+            <span class="tag tag-active">Активна</span>
+            {% else %}
+            <span class="tag tag-inactive">Неактивна</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if wg.isactive %}
+            <button class="btn-icon btn-icon-danger"
+                    onclick="deleteWg('{{ wg.work_group_uid }}', '{{ wg.group_name|replace("'","\\'") }}')">
+              <i data-feather="trash-2"></i>
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Add work group modal -->
+<div class="modal-overlay" id="addWgOverlay" style="display:none">
+  <div class="modal modal-sm">
+    <div class="modal-header">
+      <h3>Новая рабочая группа</h3>
+      <button class="modal-close" onclick="document.getElementById('addWgOverlay').style.display='none'">
+        <i data-feather="x"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Название <span class="required">*</span></label>
+        <input class="form-input" type="text" id="wgName" placeholder="Например: DevOps">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Описание</label>
+        <input class="form-input" type="text" id="wgDesc">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="document.getElementById('addWgOverlay').style.display='none'">Отмена</button>
+        <button class="btn btn-primary" id="wgSaveBtn">Создать</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('addWgBtn').onclick = function() {
+  document.getElementById('addWgOverlay').style.display = 'flex';
+  feather.replace();
+  document.getElementById('wgName').focus();
+};
+document.getElementById('wgSaveBtn').onclick = async function() {
+  const name = document.getElementById('wgName').value.trim();
+  const desc = document.getElementById('wgDesc').value.trim();
+  if (!name) { showToast('Введите название', 'error'); return; }
+  const r = await fetch('/admin/create-work-group', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({group_name: name, group_description: desc})
+  });
+  const d = await r.json();
+  if (d.success) { showToast('Группа создана', 'success'); setTimeout(() => location.reload(), 600); }
+  else showToast(d.error || 'Ошибка', 'error');
+};
+async function deleteWg(uid, name) {
+  if (!confirm(`Деактивировать группу «${name}»?`)) return;
+  const r = await fetch(`/admin/delete-work-group/${uid}`, {method:'POST'});
+  const d = await r.json();
+  if (d.success) { showToast('Деактивировано', 'success'); setTimeout(() => location.reload(), 600); }
+  else showToast(d.error || 'Ошибка', 'error');
+}
+</script>
+{% endblock %}

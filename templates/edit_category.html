@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Редактировать запись каталога{% endblock %}
+{% block content %}
+<div class="page-admin">
+  <div class="page-header">
+    <h1 class="page-title"><i data-feather="edit-2"></i> {{ cat.catalog_name }}</h1>
+    <a href="{{ url_for('admin_categories') }}" class="btn btn-ghost">
+      <i data-feather="arrow-left"></i> Назад
+    </a>
+  </div>
+  <div class="card"><div class="card-body">
+    <form method="POST">
+      <div class="form-group">
+        <label class="form-label">Родительский раздел</label>
+        <select class="form-select" name="parent_uid">
+          <option value="">— Раздел (верхний уровень) —</option>
+          {% for c in top_cats %}
+          <option value="{{ c.catalog_uid }}" {% if cat.parent_uid == c.catalog_uid %}selected{% endif %}>{{ c.catalog_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Название</label>
+          <input class="form-input" type="text" name="catalog_name" value="{{ cat.catalog_name }}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Иконка</label>
+          <input class="form-input" type="text" name="catalog_icon" value="{{ cat.catalog_icon or '' }}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Описание</label>
+        <textarea class="form-textarea" name="catalog_description" rows="2">{{ cat.catalog_description or '' }}</textarea>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Рабочая группа</label>
+          <select class="form-select" name="work_group_uid">
+            <option value="">—</option>
+            {% for wg in work_groups %}
+            <option value="{{ wg.work_group_uid }}" {% if cat.work_group_uid == wg.work_group_uid %}selected{% endif %}>{{ wg.group_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Тип заявки</label>
+          <select class="form-select" name="ticket_type">
+            <option value="service_request" {% if cat.ticket_type == 'service_request' %}selected{% endif %}>Запрос</option>
+            <option value="incident" {% if cat.ticket_type == 'incident' %}selected{% endif %}>Инцидент</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Приоритет</label>
+          <select class="form-select" name="priority">
+            {% for p in ['low','medium','high','critical'] %}
+            <option value="{{ p }}" {% if cat.priority == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">SLA</label>
+          <select class="form-select" name="sla_uid">
+            <option value="">—</option>
+            {% for s in slas %}
+            <option value="{{ s.sla_uid }}" {% if cat.sla_uid == s.sla_uid %}selected{% endif %}>{{ s.policy_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" name="approval_required" {% if cat.approval_required %}checked{% endif %}>
+            <span>Требует согласования</span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" name="is_active" {% if cat.is_active %}checked{% endif %}>
+            <span>Активна</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <a href="{{ url_for('admin_categories') }}" class="btn btn-ghost">Отмена</a>
+        <button type="submit" class="btn btn-primary"><i data-feather="save"></i> Сохранить</button>
+      </div>
+    </form>
+  </div></div>
+</div>
+{% endblock %}

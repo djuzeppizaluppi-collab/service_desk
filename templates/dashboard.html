@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Дашборд — Service Desk{% endblock %}
+{% block content %}
+
+<div class="page-dashboard">
+  <div class="page-header">
+    <h1 class="page-title">Дашборд</h1>
+    <p class="page-subtitle">{{ current_user.full_name() }} · {{ now|datefmt('%d.%m.%Y') }}</p>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-bar">
+    <div class="stat-card stat-progress">
+      <span class="stat-value">{{ stats.my_active }}</span>
+      <span class="stat-label">Мои активные</span>
+    </div>
+    <div class="stat-card stat-new">
+      <span class="stat-value">{{ stats.all_new }}</span>
+      <span class="stat-label">Новых в очереди</span>
+    </div>
+    <div class="stat-card {% if stats.overdue > 0 %}stat-alert{% else %}stat-resolved{% endif %}">
+      <span class="stat-value">{{ stats.overdue }}</span>
+      <span class="stat-label">Просрочено</span>
+    </div>
+    {% if stats.pending_approval > 0 %}
+    <div class="stat-card stat-hold">
+      <span class="stat-value">{{ stats.pending_approval }}</span>
+      <span class="stat-label">На согласовании</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="dashboard-grid">
+
+    <!-- My active tickets -->
+    <div class="dashboard-section">
+      <h3 class="section-title">
+        <i data-feather="user-check"></i> Мои заявки в работе
+      </h3>
+      {% if my_active %}
+      <div class="ticket-list-compact">
+        {% for t in my_active %}
+        <div class="ticket-row {% if t.is_overdue() %}row-overdue{% endif %}"
+             onclick="openTicket('{{ t.ticket_uid }}')">
+          <span class="ticket-row-num">{{ t.ticket_number }}</span>
+          <span class="ticket-row-summary">{{ t.summary }}</span>
+          <span class="status-badge status-{{ t.status }}">{{ t.status|status_label }}</span>
+          <span class="priority-dot priority-{{ t.priority }}"></span>
+          <span class="ticket-row-date {% if t.is_overdue() %}overdue-text{% endif %}">
+            {% if t.deadline_at %}
+            <i data-feather="clock"></i> {{ t.deadline_at|datefmt }}
+            {% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state-sm">
+        <i data-feather="check-circle"></i> Нет активных заявок
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Overdue -->
+    {% if all_overdue %}
+    <div class="dashboard-section dashboard-section-alert">
+      <h3 class="section-title">
+        <i data-feather="alert-circle"></i> Просроченные заявки
+      </h3>
+      <div class="ticket-list-compact">
+        {% for t in all_overdue %}
+        <div class="ticket-row row-overdue" onclick="openTicket('{{ t.ticket_uid }}')">
+          <span class="ticket-row-num">{{ t.ticket_number }}</span>
+          <span class="ticket-row-summary">{{ t.summary }}</span>
+          <span class="ticket-row-cat">
+            {% if t.performer %}{{ t.performer.full_name() }}{% else %}Не назначен{% endif %}
+          </span>
+          <span class="overdue-text"><i data-feather="clock"></i> {{ t.deadline_at|datefmt }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Pending approval -->
+    {% if pending_approval %}
+    <div class="dashboard-section">
+      <h3 class="section-title">
+        <i data-feather="check-square"></i> Ожидают вашего согласования
+      </h3>
+      <div class="ticket-list-compact">
+        {% for a in pending_approval %}
+        <div class="ticket-row" onclick="openTicket('{{ a.ticket_rel.ticket_uid }}')">
+          <span class="ticket-row-num">{{ a.ticket_rel.ticket_number }}</span>
+          <span class="ticket-row-summary">{{ a.ticket_rel.summary }}</span>
+          <span class="ticket-row-cat">{{ a.step_name or 'Согласование' }}</span>
+          <span class="status-badge status-pending_approval">На согласовании</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- New unassigned -->
+    <div class="dashboard-section">
+      <h3 class="section-title">
+        <i data-feather="inbox"></i> Новые заявки в очереди
+      </h3>
+      {% if all_new %}
+      <div class="ticket-list-compact">
+        {% for t in all_new %}
+        <div class="ticket-row" onclick="openTicket('{{ t.ticket_uid }}')">
+          <span class="ticket-row-num">{{ t.ticket_number }}</span>
+          <span class="ticket-row-summary">{{ t.summary }}</span>
+          <span class="ticket-row-cat">{{ t.catalog.catalog_name if t.catalog else '—' }}</span>
+          <span class="priority-badge priority-{{ t.priority }}">{{ t.priority|priority_label }}</span>
+          <span class="ticket-row-date">{{ t.created_at|datefmt }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state-sm">
+        <i data-feather="check-circle"></i> Очередь пуста
+      </div>
+      {% endif %}
+      <div class="section-footer">
+        <a href="{{ url_for('tickets_board') }}" class="btn btn-ghost btn-sm">
+          Все заявки <i data-feather="arrow-right"></i>
+        </a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Каталог — Админ{% endblock %}
+{% block content %}
+<div class="page-admin">
+  <div class="page-header">
+    <h1 class="page-title"><i data-feather="grid"></i> Каталог услуг</h1>
+    <a href="{{ url_for('create_category') }}" class="btn btn-primary">
+      <i data-feather="plus"></i> Добавить
+    </a>
+  </div>
+
+  {% for cat in categories %}
+  <div class="catalog-admin-section">
+    <div class="catalog-admin-header">
+      <div class="catalog-admin-title">
+        <i data-feather="{{ cat.catalog_icon or 'folder' }}"></i>
+        <strong>{{ cat.catalog_name }}</strong>
+        <span class="text-muted">/ {{ cat.catalog_path }}</span>
+        {% if not cat.is_active %}<span class="tag tag-inactive">Неактивна</span>{% endif %}
+      </div>
+      <div class="catalog-admin-actions">
+        <a href="{{ url_for('edit_category', cat_uid=cat.catalog_uid) }}" class="btn-icon">
+          <i data-feather="edit-2"></i>
+        </a>
+        <button class="btn-icon btn-icon-danger"
+                onclick="deleteCategory('{{ cat.catalog_uid }}', '{{ cat.catalog_name|replace("'","\\'") }}')">
+          <i data-feather="trash-2"></i>
+        </button>
+      </div>
+    </div>
+    <div class="catalog-admin-services">
+      {% if cat._services %}
+      {% for svc in cat._services %}
+      <div class="catalog-admin-svc">
+        <i data-feather="{{ svc.catalog_icon or 'file' }}"></i>
+        <span class="svc-name">{{ svc.catalog_name }}</span>
+        {% if not svc.is_active %}<span class="tag tag-inactive">Неактивна</span>{% endif %}
+        {% if svc.approval_required %}<span class="tag tag-approval">Согласование</span>{% endif %}
+        <span class="tag">{{ svc.ticket_type }}</span>
+        <span class="tag tag-priority-{{ svc.priority }}">{{ svc.priority }}</span>
+        <div class="svc-actions">
+          <a href="{{ url_for('edit_category', cat_uid=svc.catalog_uid) }}" class="btn-icon">
+            <i data-feather="edit-2"></i>
+          </a>
+          <button class="btn-icon btn-icon-danger"
+                  onclick="deleteCategory('{{ svc.catalog_uid }}', '{{ svc.catalog_name|replace("'","\\'") }}')">
+            <i data-feather="trash-2"></i>
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="catalog-admin-empty">Нет услуг в разделе</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<script>
+async function deleteCategory(uid, name) {
+  if (!confirm(`Деактивировать «${name}»?`)) return;
+  const r = await fetch(`/admin/delete-category/${uid}`, {method:'POST'});
+  const d = await r.json();
+  if (d.success) { showToast('Деактивировано', 'success'); setTimeout(() => location.reload(), 600); }
+  else showToast(d.error || 'Ошибка', 'error');
+}
+</script>
+{% endblock %}

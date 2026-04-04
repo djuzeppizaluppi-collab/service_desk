@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Журнал аудита — Админ{% endblock %}
+{% block content %}
+<div class="page-admin">
+  <div class="page-header">
+    <h1 class="page-title"><i data-feather="file-text"></i> Журнал аудита</h1>
+  </div>
+  <div class="table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Пользователь</th>
+          <th>Действие</th>
+          <th>Объект</th>
+          <th>Детали</th>
+          <th>IP</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs.items %}
+        {% set u = User.query.get(log.user_uid) %}
+        <tr>
+          <td class="td-date">{{ log.create_date|datefmt }}</td>
+          <td>
+            {% if u %}
+            <a href="/user/{{ u.user_uid }}" class="user-chip-sm">
+              {{ u.avatar_emoji() }} {{ u.full_name() }}
+            </a>
+            {% else %}—{% endif %}
+          </td>
+          <td><span class="tag">{{ log.action }}</span></td>
+          <td>{{ log.object_type or '—' }}</td>
+          <td>{{ log.details or '—' }}</td>
+          <td class="td-mono text-muted">{{ log.ip_address or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table-empty">Записей нет</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  {% if logs.pages > 1 %}
+  <div class="pagination">
+    {% if logs.has_prev %}
+    <a href="?page={{ logs.prev_num }}" class="btn btn-ghost btn-sm">← Назад</a>
+    {% endif %}
+    <span>Стр. {{ logs.page }} / {{ logs.pages }}</span>
+    {% if logs.has_next %}
+    <a href="?page={{ logs.next_num }}" class="btn btn-ghost btn-sm">Вперёд →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
