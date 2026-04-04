@@ -342,6 +342,11 @@ def init_db():
         cat = ServiceCatalog.query.filter_by(catalog_path=path).first()
         if not cat:
             parent_uid = cat_map.get(parent_key)
+            if prio == 'high':
+                picked_sla_uid = sla_hi.sla_uid if sla_hi else (sla_std.sla_uid if sla_std else None)
+            else:
+                picked_sla_uid = sla_std.sla_uid if sla_std else (sla_hi.sla_uid if sla_hi else None)
+
             cat = ServiceCatalog(
                 catalog_name=name, catalog_path=path,
                 catalog_type='service' if parent_key else 'category',
@@ -349,7 +354,7 @@ def init_db():
                 work_group_uid=wg_map.get(wg_key),
                 ticket_type=ttype or 'service_request',
                 priority=prio or 'medium',
-                sla_uid=(sla_hi.sla_uid if prio == 'high' else sla_std.sla_uid) if sla_std else None,
+                sla_uid=picked_sla_uid,
                 catalog_icon=icon, catalog_description=desc,
                 approval_required=appr, create_by=SYS,
             )
