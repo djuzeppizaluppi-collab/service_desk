@@ -93,8 +93,7 @@ class User(UserMixin, db.Model):
         return [l.work_group for l in self.work_group_links.order_by(UserWorkGroup.assigned_date).all()]
 
     def avatar_emoji(self):
-        return AVATAR_EMOJIS.get(self.avatar or 'cat', '🙂')
-
+        return ''
 
 # ---------------------------------------------------------------------------
 # sm.passwords
@@ -254,8 +253,12 @@ class Ticket(db.Model):
                                 foreign_keys='TicketApproval.ticket_uid')
 
     def is_overdue(self):
-        return bool(self.deadline_at and self.status not in ('resolved', 'closed', 'cancelled')
-                    and self.deadline_at < datetime.utcnow())
+        if not self.deadline_at or self.status in ('resolved', 'closed', 'cancelled'):
+            return False
+        now = (datetime.now(self.deadline_at.tzinfo)
+               if self.deadline_at.tzinfo
+               else datetime.utcnow())
+        return self.deadline_at < now
 
 
 # ---------------------------------------------------------------------------

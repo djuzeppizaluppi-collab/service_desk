@@ -77,9 +77,7 @@ BOARD_COLUMNS = {
     'done':        ('Завершено',       ['resolved', 'closed', 'cancelled']),
 }
 PRIORITIES = {'low': 'Низкий', 'medium': 'Средний', 'high': 'Высокий', 'critical': 'Критический'}
-AVATAR_LIST = ['cat', 'dog', 'fox', 'bear', 'penguin', 'owl',
-               'tiger', 'rabbit', 'wolf', 'panda', 'frog', 'lion',
-               'koala', 'duck', 'dragon']
+AVATAR_LIST = []
 
 
 # ============================================================
