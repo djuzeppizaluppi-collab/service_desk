@@ -157,7 +157,7 @@ def priority_label_filter(p):
 @app.template_filter('datefmt')
 def datefmt_filter(dt, fmt='%d.%m.%Y %H:%M'):
     if not dt:
-        return 'E2014'
+        return '—'
     return dt.strftime(fmt)
 
 
