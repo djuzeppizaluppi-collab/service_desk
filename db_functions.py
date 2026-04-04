@@ -56,7 +56,7 @@ def generate_login(last_name: str, first_name: str, middle_name: str = None) -> 
         if row and not row.startswith('ERROR'):
             return row
     except Exception:
-        pass
+        db.session.rollback()
 
     # Python fallback
     base_ln = translit(last_name)[:8]
@@ -83,7 +83,7 @@ def generate_password() -> str:
         if row:
             return row
     except Exception:
-        pass
+        db.session.rollback()
 
     # Python fallback: guaranteed to have upper, lower, digit, special
     chars = string.ascii_letters + string.digits + '!@#$%&*'
@@ -237,7 +237,7 @@ def reset_password_db(user_name: str):
         # The PG function stores a bcrypt hash — but we need Werkzeug hash for Flask.
         # Overwrite with Werkzeug hash so check_password_hash() works.
     except Exception:
-        pass
+        db.session.rollback()
 
     _set_password_hash(user.user_uid, temp_password)
 
