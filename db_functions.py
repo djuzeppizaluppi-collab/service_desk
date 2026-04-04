@@ -14,7 +14,7 @@ import string
 from sqlalchemy import text
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Password, UserRole, WorkGroup, UserWorkGroup, gen_uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +139,8 @@ def generate_ticket_number() -> str:
 # ---------------------------------------------------------------------------
 def create_user_db(last_name, first_name, middle_name, email, mobile,
                    work_phone, gender, title, department, company,
-                   role='user', work_group_uid=None, creator_uid=None) -> tuple:
+                   role='user', work_group_uid=None, manager_uid=None,
+                   creator_uid=None, avatar='cat') -> tuple:
     """
     Creates a user.  Tries sm.create_user() first; falls back to manual INSERT.
 
@@ -193,6 +194,8 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
         title=title or None,
         department=department or None,
         company=company or None,
+        manager_uid=manager_uid,
+        avatar=avatar or 'cat',
         create_by=sys_uid,
         update_by=sys_uid,
     )
@@ -296,3 +299,76 @@ def add_ticket_history(ticket_uid, field_name, old_value, new_value, changed_by_
         changed_by=changed_by_uid,
     )
     db.session.add(h)
+
+
+def compute_deadline(catalog):
+    """Estimate ticket deadline from linked SLA policy."""
+    hours = 24
+    if getattr(catalog, 'sla', None) and getattr(catalog.sla, 'resolution_time_hours', None):
+        hours = catalog.sla.resolution_time_hours
+    elif getattr(catalog, 'priority', None) == 'critical':
+        hours = 4
+    elif getattr(catalog, 'priority', None) == 'high':
+        hours = 8
+    elif getattr(catalog, 'priority', None) == 'low':
+        hours = 72
+    return datetime.utcnow() + timedelta(hours=hours)
+
+
+def notify(user_uid, message, ticket_uid=None):
+    from models import Notification
+    db.session.add(Notification(
+        user_uid=user_uid,
+        message=message,
+        ticket_uid=ticket_uid,
+    ))
+
+
+def notify_ticket_update(ticket, message, exclude_uid=None):
+    recipients = {ticket.requester_uid, ticket.recipient_uid, ticket.performer_uid}
+    recipients = {uid for uid in recipients if uid and uid != exclude_uid}
+    for uid in recipients:
+        notify(uid, message, ticket_uid=ticket.ticket_uid)
+
+
+def audit(user_uid, action, entity_type=None, entity_uid=None, details=None, ip=None):
+    from models import AuditLog
+    db.session.add(AuditLog(
+        user_uid=user_uid,
+        action=action,
+        entity_type=entity_type,
+        entity_uid=entity_uid,
+        details=details,
+        ip_address=ip,
+    ))
+
+
+def create_approval_chain(ticket, catalog, requester):
+    from models import TicketApproval, User
+    approver_uid = requester.manager_uid
+    if not approver_uid:
+        manager = User.query.join(UserRole).filter(UserRole.role.in_(['manager', 'admin'])).first()
+        approver_uid = manager.user_uid if manager else None
+    db.session.add(TicketApproval(
+        ticket_uid=ticket.ticket_uid,
+        step_order=1,
+        step_name='Согласование руководителя',
+        approver_uid=approver_uid,
+        status='pending',
+    ))
+
+
+def process_approval_decision(ticket, approval, decision, comment, actor_uid):
+    valid = {'approved', 'rejected'}
+    if decision not in valid:
+        raise ValueError('Недопустимое решение согласования')
+    approval.status = decision
+    approval.comment = comment or None
+    approval.decided_at = datetime.utcnow()
+    add_ticket_history(ticket.ticket_uid, 'approval', 'pending', decision, actor_uid)
+    if decision == 'approved':
+        ticket.status = 'new'
+        notify_ticket_update(ticket, f'Заявка {ticket.ticket_number} согласована', exclude_uid=actor_uid)
+    else:
+        ticket.status = 'rejected'
+        notify_ticket_update(ticket, f'Заявка {ticket.ticket_number} отклонена', exclude_uid=actor_uid)
