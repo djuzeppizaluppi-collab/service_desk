@@ -25,7 +25,7 @@
           <td>
             {% if u %}
             <a href="/user/{{ u.user_uid }}" class="user-chip-sm">
-              {{ u.avatar_emoji() }} {{ u.full_name() }}
+              {{ u.full_name() }}
             </a>
             {% else %}—{% endif %}
           </td>
