@@ -77,9 +77,7 @@ BOARD_COLUMNS = {
     'done':        ('Завершено',       ['resolved', 'closed', 'cancelled']),
 }
 PRIORITIES = {'low': 'Низкий', 'medium': 'Средний', 'high': 'Высокий', 'critical': 'Критический'}
-AVATAR_LIST = ['cat', 'dog', 'fox', 'bear', 'penguin', 'owl',
-               'tiger', 'rabbit', 'wolf', 'panda', 'frog', 'lion',
-               'koala', 'duck', 'dragon']
+AVATAR_LIST = []
 
 
 # ============================================================
@@ -157,7 +155,7 @@ def priority_label_filter(p):
 @app.template_filter('datefmt')
 def datefmt_filter(dt, fmt='%d.%m.%Y %H:%M'):
     if not dt:
-        return 'E2014'
+        return '—'
     return dt.strftime(fmt)
 
 
@@ -180,9 +178,101 @@ def inject_globals():
 def init_db():
     """Initialize schema and default data."""
     from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
     db.session.execute(text('CREATE SCHEMA IF NOT EXISTS sm'))
     db.session.commit()
-    db.create_all()
+    try:
+        db.create_all()
+    except SQLAlchemyError:
+        # Existing installations can have UUID columns in base tables while
+        # ORM models use String(36). In that case create_all() may fail when
+        # creating new FK tables. Continue with explicit SQL below.
+        db.session.rollback()
+
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.approval_routes (
+            route_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            route_name varchar(200) NOT NULL,
+            catalog_uid uuid NOT NULL REFERENCES sm.service_catalog(catalog_uid) ON DELETE CASCADE,
+            is_active bool DEFAULT true NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+            create_by uuid NOT NULL REFERENCES sm.users(user_uid)
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.approval_steps (
+            step_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            route_uid uuid NOT NULL REFERENCES sm.approval_routes(route_uid) ON DELETE CASCADE,
+            step_order int4 NOT NULL DEFAULT 1,
+            step_name varchar(200) NULL,
+            approver_uid uuid NULL REFERENCES sm.users(user_uid),
+            approver_role varchar(32) NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.ticket_approvals (
+            approval_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            ticket_uid uuid NOT NULL REFERENCES sm.tickets(ticket_uid) ON DELETE CASCADE,
+            step_order int4 NOT NULL DEFAULT 1,
+            step_name varchar(200) NULL,
+            approver_uid uuid NULL REFERENCES sm.users(user_uid),
+            status varchar(20) NOT NULL DEFAULT 'pending',
+            comment text NULL,
+            decided_at timestamptz NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.notifications (
+            notification_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_uid uuid NOT NULL REFERENCES sm.users(user_uid) ON DELETE CASCADE,
+            message text NOT NULL,
+            ticket_uid uuid NULL REFERENCES sm.tickets(ticket_uid) ON DELETE SET NULL,
+            is_read bool DEFAULT false NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.ticket_templates (
+            template_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            template_name varchar(200) NOT NULL,
+            catalog_uid uuid NOT NULL REFERENCES sm.service_catalog(catalog_uid) ON DELETE CASCADE,
+            summary varchar(500) NOT NULL,
+            description text NOT NULL,
+            priority varchar(20) NULL,
+            created_by uuid NOT NULL REFERENCES sm.users(user_uid),
+            is_public bool DEFAULT false NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.audit_log (
+            audit_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_uid uuid NULL REFERENCES sm.users(user_uid) ON DELETE SET NULL,
+            action varchar(64) NOT NULL,
+            entity_type varchar(64) NULL,
+            entity_uid uuid NULL,
+            details text NULL,
+            ip_address varchar(64) NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    # Lightweight compatibility migration for older databases.
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.users
+            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL,
+            ADD COLUMN IF NOT EXISTS avatar varchar(32) NULL DEFAULT 'cat'
+    """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.service_catalog
+            ADD COLUMN IF NOT EXISTS is_active bool DEFAULT true,
+            ADD COLUMN IF NOT EXISTS approval_required bool DEFAULT false
+    """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.tickets
+            ADD COLUMN IF NOT EXISTS deadline_at timestamptz NULL
+    """))
+    db.session.commit()
 
     SYS = '00000000-0000-0000-0000-000000000001'
 
@@ -250,6 +340,11 @@ def init_db():
         cat = ServiceCatalog.query.filter_by(catalog_path=path).first()
         if not cat:
             parent_uid = cat_map.get(parent_key)
+            if prio == 'high':
+                picked_sla_uid = sla_hi.sla_uid if sla_hi else (sla_std.sla_uid if sla_std else None)
+            else:
+                picked_sla_uid = sla_std.sla_uid if sla_std else (sla_hi.sla_uid if sla_hi else None)
+
             cat = ServiceCatalog(
                 catalog_name=name, catalog_path=path,
                 catalog_type='service' if parent_key else 'category',
@@ -257,7 +352,7 @@ def init_db():
                 work_group_uid=wg_map.get(wg_key),
                 ticket_type=ttype or 'service_request',
                 priority=prio or 'medium',
-                sla_uid=(sla_hi.sla_uid if prio == 'high' else sla_std.sla_uid) if sla_std else None,
+                sla_uid=picked_sla_uid,
                 catalog_icon=icon, catalog_description=desc,
                 approval_required=appr, create_by=SYS,
             )
