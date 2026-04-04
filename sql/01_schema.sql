@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS sm.users (
     title           varchar(255) NULL,
     department      varchar(255) NULL,
     company         varchar(255) NULL,
+    manager_uid     uuid NULL,
+    avatar          varchar(32) DEFAULT 'cat' NULL,
     work_status     varchar(20)  NULL,
     is_vip          bool         DEFAULT false NULL,
     is_deactivated  bool         DEFAULT false NULL,
@@ -112,6 +114,8 @@ CREATE TABLE IF NOT EXISTS sm.service_catalog (
     work_group_uid      uuid NULL REFERENCES sm.work_groups(work_group_uid),
     ticket_type         varchar(100) DEFAULT 'service_request',
     priority            varchar(20)  DEFAULT 'medium',
+    approval_required   bool DEFAULT false NULL,
+    is_active           bool DEFAULT true NULL,
     sla_uid             uuid NULL REFERENCES sm.sla_policies(sla_uid),
     catalog_icon        varchar(64)  DEFAULT 'briefcase',
     catalog_description text NULL,
@@ -135,6 +139,7 @@ CREATE TABLE IF NOT EXISTS sm.tickets (
     performer_uid uuid         NULL     REFERENCES sm.users(user_uid),
     status        varchar(50)  NOT NULL DEFAULT 'new',
     priority      varchar(20)  NULL     DEFAULT 'medium',
+    deadline_at   timestamptz  NULL,
     resolved_at   timestamptz  NULL,
     closed_at     timestamptz  NULL,
     created_at    timestamptz  DEFAULT CURRENT_TIMESTAMP NULL,
@@ -183,6 +188,86 @@ CREATE TABLE IF NOT EXISTS sm.attachments (
     file_size       text NULL,
     uploaded_by     uuid NOT NULL REFERENCES sm.users(user_uid),
     upload_date     timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+);
+
+-- -------------------------------------------------------------
+-- sm.approval_routes
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sm.approval_routes (
+    route_uid    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    route_name   varchar(200) NOT NULL,
+    catalog_uid  uuid NOT NULL REFERENCES sm.service_catalog(catalog_uid) ON DELETE CASCADE,
+    is_active    bool DEFAULT true NULL,
+    create_date  timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+    create_by    uuid NOT NULL REFERENCES sm.users(user_uid)
+);
+
+-- -------------------------------------------------------------
+-- sm.approval_steps
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sm.approval_steps (
+    step_uid       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    route_uid      uuid NOT NULL REFERENCES sm.approval_routes(route_uid) ON DELETE CASCADE,
+    step_order     int4 NOT NULL DEFAULT 1,
+    step_name      varchar(200) NULL,
+    approver_uid   uuid NULL REFERENCES sm.users(user_uid),
+    approver_role  varchar(32) NULL
+);
+
+-- -------------------------------------------------------------
+-- sm.ticket_approvals
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sm.ticket_approvals (
+    approval_uid  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    ticket_uid    uuid NOT NULL REFERENCES sm.tickets(ticket_uid) ON DELETE CASCADE,
+    step_order    int4 NOT NULL DEFAULT 1,
+    step_name     varchar(200) NULL,
+    approver_uid  uuid NULL REFERENCES sm.users(user_uid),
+    status        varchar(20) NOT NULL DEFAULT 'pending',
+    comment       text NULL,
+    decided_at    timestamptz NULL,
+    create_date   timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+);
+
+-- -------------------------------------------------------------
+-- sm.notifications
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sm.notifications (
+    notification_uid  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_uid          uuid NOT NULL REFERENCES sm.users(user_uid) ON DELETE CASCADE,
+    message           text NOT NULL,
+    ticket_uid        uuid NULL REFERENCES sm.tickets(ticket_uid) ON DELETE SET NULL,
+    is_read           bool DEFAULT false NULL,
+    create_date       timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+);
+
+-- -------------------------------------------------------------
+-- sm.ticket_templates
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sm.ticket_templates (
+    template_uid    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_name   varchar(200) NOT NULL,
+    catalog_uid     uuid NOT NULL REFERENCES sm.service_catalog(catalog_uid) ON DELETE CASCADE,
+    summary         varchar(500) NOT NULL,
+    description     text NOT NULL,
+    priority        varchar(20) NULL,
+    created_by      uuid NOT NULL REFERENCES sm.users(user_uid),
+    is_public       bool DEFAULT false NULL,
+    create_date     timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+);
+
+-- -------------------------------------------------------------
+-- sm.audit_log
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS sm.audit_log (
+    audit_uid      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_uid       uuid NULL REFERENCES sm.users(user_uid) ON DELETE SET NULL,
+    action         varchar(64) NOT NULL,
+    entity_type    varchar(64) NULL,
+    entity_uid     uuid NULL,
+    details        text NULL,
+    ip_address     varchar(64) NULL,
+    create_date    timestamptz DEFAULT CURRENT_TIMESTAMP NULL
 );
 
 -- -------------------------------------------------------------
