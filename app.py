@@ -77,9 +77,6 @@ BOARD_COLUMNS = {
     'done':        ('Завершено',       ['resolved', 'closed', 'cancelled']),
 }
 PRIORITIES = {'low': 'Низкий', 'medium': 'Средний', 'high': 'Высокий', 'critical': 'Критический'}
-AVATAR_LIST = []
-
-
 # ============================================================
 # HELPERS
 # ============================================================
@@ -166,7 +163,6 @@ def inject_globals():
         'is_specialist': is_specialist,
         'now': datetime.utcnow(),
         'PRIORITIES': PRIORITIES,
-        'AVATAR_LIST': AVATAR_LIST,
         'User': User,
     }
 
@@ -280,7 +276,7 @@ def init_db():
         uid = gen_uuid()
         db.session.add(User(user_uid=uid, user_name='admin',
                             first_name='Администратор', last_name='Системный',
-                            email='admin@company.ru', avatar='dragon', create_by=SYS))
+                            email='admin@company.ru', create_by=SYS))
         db.session.flush()
         db.session.add(Password(user_uid=uid,
                                 passwordhash=generate_password_hash('Admin123!'),
@@ -515,21 +511,6 @@ def profile():
     ).order_by(Ticket.created_at.desc()).limit(20).all()
     manager = User.query.get(current_user.manager_uid) if current_user.manager_uid else None
     return render_template('profile.html', tickets=tickets, manager=manager)
-
-
-@app.route('/profile/avatar', methods=['POST'])
-@login_required
-def profile_avatar():
-    avatar = request.form.get('avatar', 'cat')
-    if avatar not in AVATAR_LIST:
-        flash('Неверный аватар', 'error')
-        return redirect('/profile')
-    current_user.avatar = avatar
-    current_user.update_date = datetime.utcnow()
-    current_user.update_by = current_user.user_uid
-    db.session.commit()
-    flash('Аватар обновлён', 'success')
-    return redirect('/profile')
 
 
 @app.route('/profile/password', methods=['POST'])
@@ -797,7 +778,6 @@ def get_ticket(ticket_uid):
             'uid': pv.param_value_uid,
             'author': pv.author_rel.full_name() if pv.author_rel else '—',
             'author_uid': pv.author_uid,
-            'author_avatar': pv.author_rel.avatar_emoji() if pv.author_rel else '🙂',
             'text': pv.param_value,
             'is_internal': pv.param_type == 'internal_comment',
             'created_at': pv.create_date.strftime('%d.%m.%Y %H:%M'),
@@ -849,7 +829,6 @@ def get_ticket(ticket_uid):
         'requester_uid':    ticket.requester_uid,
         'performer':        ticket.performer.full_name() if ticket.performer else None,
         'performer_uid':    ticket.performer_uid,
-        'performer_avatar': ticket.performer.avatar_emoji() if ticket.performer else None,
         'deadline':         ticket.deadline_at.strftime('%d.%m.%Y %H:%M') if ticket.deadline_at else None,
         'is_overdue':       ticket.is_overdue(),
         'created_at':       ticket.created_at.strftime('%d.%m.%Y %H:%M'),
@@ -1013,7 +992,6 @@ def add_comment(ticket_uid):
         'comment': {
             'author': current_user.full_name(),
             'author_uid': current_user.user_uid,
-            'author_avatar': current_user.avatar_emoji(),
             'text': text,
             'is_internal': is_internal,
             'created_at': datetime.utcnow().strftime('%d.%m.%Y %H:%M'),
@@ -1104,7 +1082,7 @@ def get_specialists():
         ).order_by(User.last_name).all()
     return jsonify([{
         'user_uid': u.user_uid, 'full_name': u.full_name(),
-        'avatar': u.avatar_emoji(), 'role': u.role,
+        'role': u.role,
     } for u in users])
 
 
@@ -1215,7 +1193,6 @@ def create_user():
         role        = request.form.get('role', 'user')
         wg_uid      = request.form.get('work_group_uid') or None
         manager_uid = request.form.get('manager_uid') or None
-        avatar      = request.form.get('avatar', 'cat')
 
         if User.query.filter_by(email=email).first():
             return render_template('create_user.html', work_groups=work_groups,
@@ -1226,7 +1203,7 @@ def create_user():
                 last_name, first_name, middle_name, email, mobile,
                 work_phone, gender, title, department, company,
                 role=role, work_group_uid=wg_uid, manager_uid=manager_uid,
-                creator_uid=current_user.user_uid, avatar=avatar,
+                creator_uid=current_user.user_uid,
             )
             audit(current_user.user_uid, 'create_user', 'user', None,
                   f'Создан пользователь {user_name}', request.remote_addr)
@@ -1266,7 +1243,6 @@ def edit_user(user_uid):
         user.department     = request.form.get('department', '').strip() or user.department
         user.company        = request.form.get('company', '').strip() or user.company
         user.manager_uid    = request.form.get('manager_uid') or None
-        user.avatar         = request.form.get('avatar', user.avatar)
         user.is_deactivated = 'is_deactivated' in request.form
         user.update_date    = datetime.utcnow()
         user.update_by      = current_user.user_uid

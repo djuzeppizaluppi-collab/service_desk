@@ -59,7 +59,6 @@
 
       <!-- Profile -->
       <a href="{{ url_for('profile') }}" class="nav-profile {% if request.endpoint == 'profile' %}active{% endif %}">
-        <span class="nav-avatar">{{ current_user.avatar_emoji() }}</span>
         <span class="nav-name">{{ current_user.first_name }}</span>
       </a>
 

@@ -33,7 +33,6 @@
     <table class="admin-table" id="usersTable">
       <thead>
         <tr>
-          <th>Аватар</th>
           <th>ФИО</th>
           <th>Логин</th>
           <th>Email</th>
@@ -55,7 +54,6 @@
             data-login="{{ u.user_name|lower }}"
             data-role="{{ u.role }}"
             data-wg="{{ wgs[0].group_name if wgs else '' }}">
-          <td class="td-avatar">{{ u.avatar_emoji() }}</td>
           <td>
             <a href="/user/{{ u.user_uid }}" class="user-name-link">{{ u.full_name() }}</a>
           </td>
@@ -67,7 +65,7 @@
           <td>
             {% if mgr %}
             <a href="/user/{{ mgr.user_uid }}" class="user-chip-sm">
-              {{ mgr.avatar_emoji() }} {{ mgr.full_name() }}
+              {{ mgr.full_name() }}
             </a>
             {% else %}—{% endif %}
           </td>

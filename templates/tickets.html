@@ -10,11 +10,25 @@
     <div class="page-header-actions">
       <!-- View mode toggle (Дор. #10) -->
       <div class="view-toggle">
-        <a href="{{ url_for('tickets_board', **{**request.args, 'view': 'board'}) }}"
+        <a href="{{ url_for('tickets_board',
+                            view='board',
+                            status=filters.status,
+                            assignee=filters.assignee,
+                            date_from=filters.date_from,
+                            date_to=filters.date_to,
+                            work_group=filters.work_group,
+                            priority=filters.priority) }}"
            class="view-toggle-btn {% if view_mode == 'board' %}active{% endif %}" title="Канбан">
           <i data-feather="layout"></i>
         </a>
-        <a href="{{ url_for('tickets_board', **{**request.args, 'view': 'table'}) }}"
+        <a href="{{ url_for('tickets_board',
+                            view='table',
+                            status=filters.status,
+                            assignee=filters.assignee,
+                            date_from=filters.date_from,
+                            date_to=filters.date_to,
+                            work_group=filters.work_group,
+                            priority=filters.priority) }}"
            class="view-toggle-btn {% if view_mode == 'table' %}active{% endif %}" title="Таблица">
           <i data-feather="list"></i>
         </a>
@@ -161,9 +175,9 @@
           </div>
           <div class="card-footer">
             {% if t.performer %}
-            <a class="card-avatar" href="/user/{{ t.performer_uid }}"
+            <a class="user-chip" href="/user/{{ t.performer_uid }}"
                onclick="event.stopPropagation()" title="{{ t.performer.full_name() }}">
-              {{ t.performer.avatar_emoji() }}
+              {{ t.performer.full_name() }}
             </a>
             {% else %}
             <span class="card-unassigned">Не назначен</span>
@@ -221,7 +235,7 @@
           <td>
             {% if t.performer %}
             <a class="user-chip" href="/user/{{ t.performer_uid }}" onclick="event.stopPropagation()">
-              {{ t.performer.avatar_emoji() }} {{ t.performer.full_name() }}
+              {{ t.performer.full_name() }}
             </a>
             {% else %}—{% endif %}
           </td>
