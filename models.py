@@ -4,6 +4,11 @@ from flask_login import UserMixin
 from datetime import datetime
 
 db = SQLAlchemy()
+AVATAR_EMOJIS = {
+    'cat': '🐱', 'dog': '🐶', 'fox': '🦊', 'bear': '🐻', 'penguin': '🐧',
+    'owl': '🦉', 'tiger': '🐯', 'rabbit': '🐰', 'wolf': '🐺', 'panda': '🐼',
+    'frog': '🐸', 'lion': '🦁', 'koala': '🐨', 'duck': '🦆', 'dragon': '🐲',
+}
 
 
 def gen_uuid():
@@ -29,6 +34,8 @@ class User(UserMixin, db.Model):
     title = db.Column(db.String(255), nullable=True)
     department = db.Column(db.String(255), nullable=True)
     company = db.Column(db.String(255), nullable=True)
+    manager_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=True)
+    avatar = db.Column(db.String(32), nullable=False, default='cat')
     work_status = db.Column(db.String(20), nullable=True)
     is_vip = db.Column(db.Boolean, default=False)
     is_deactivated = db.Column(db.Boolean, default=False)
@@ -81,6 +88,12 @@ class User(UserMixin, db.Model):
         if link:
             return link.work_group
         return None
+
+    def all_work_groups(self):
+        return [l.work_group for l in self.work_group_links.order_by(UserWorkGroup.assigned_date).all()]
+
+    def avatar_emoji(self):
+        return AVATAR_EMOJIS.get(self.avatar or 'cat', '🙂')
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +194,8 @@ class ServiceCatalog(db.Model):
                                nullable=True)
     ticket_type = db.Column(db.String(100), default='service_request')
     priority = db.Column(db.String(20), default='medium')
+    approval_required = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)
     sla_uid = db.Column(db.String(36), db.ForeignKey('sm.sla_policies.sla_uid'), nullable=True)
     create_date = db.Column(db.DateTime, default=datetime.utcnow)
     update_date = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -215,6 +230,7 @@ class Ticket(db.Model):
     performer_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=True)
     status = db.Column(db.String(50), default='new', nullable=False)
     priority = db.Column(db.String(20), default='medium')
+    deadline_at = db.Column(db.DateTime, nullable=True)
     resolved_at = db.Column(db.DateTime, nullable=True)
     closed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -232,6 +248,14 @@ class Ticket(db.Model):
                                   foreign_keys='Attachment.ticket_uid')
 
     creator = db.relationship('User', foreign_keys=[created_by])
+
+    approvals = db.relationship('TicketApproval', backref='ticket', lazy='dynamic',
+                                cascade='all, delete-orphan',
+                                foreign_keys='TicketApproval.ticket_uid')
+
+    def is_overdue(self):
+        return bool(self.deadline_at and self.status not in ('resolved', 'closed', 'cancelled')
+                    and self.deadline_at < datetime.utcnow())
 
 
 # ---------------------------------------------------------------------------
@@ -289,3 +313,93 @@ class Attachment(db.Model):
     upload_date = db.Column(db.DateTime, default=datetime.utcnow)
 
     uploader = db.relationship('User', foreign_keys=[uploaded_by])
+
+
+class ApprovalRoute(db.Model):
+    __tablename__ = 'approval_routes'
+    __table_args__ = {'schema': 'sm'}
+
+    route_uid = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    catalog_uid = db.Column(db.String(36), db.ForeignKey('sm.service_catalog.catalog_uid'), nullable=False)
+    route_name = db.Column(db.String(200), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    create_date = db.Column(db.DateTime, default=datetime.utcnow)
+    create_by = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=False)
+
+    steps = db.relationship('ApprovalStep', backref='route', lazy='dynamic',
+                            cascade='all, delete-orphan',
+                            foreign_keys='ApprovalStep.route_uid')
+
+
+class ApprovalStep(db.Model):
+    __tablename__ = 'approval_steps'
+    __table_args__ = {'schema': 'sm'}
+
+    step_uid = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    route_uid = db.Column(db.String(36), db.ForeignKey('sm.approval_routes.route_uid'), nullable=False)
+    step_order = db.Column(db.Integer, nullable=False, default=1)
+    step_name = db.Column(db.String(200), nullable=True)
+    approver_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=True)
+    approver_role = db.Column(db.String(32), nullable=True)
+
+    approver = db.relationship('User', foreign_keys=[approver_uid])
+
+
+class TicketApproval(db.Model):
+    __tablename__ = 'ticket_approvals'
+    __table_args__ = {'schema': 'sm'}
+
+    approval_uid = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    ticket_uid = db.Column(db.String(36), db.ForeignKey('sm.tickets.ticket_uid', ondelete='CASCADE'), nullable=False)
+    step_order = db.Column(db.Integer, nullable=False, default=1)
+    step_name = db.Column(db.String(200), nullable=True)
+    approver_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=True)
+    status = db.Column(db.String(20), nullable=False, default='pending')
+    comment = db.Column(db.Text, nullable=True)
+    decided_at = db.Column(db.DateTime, nullable=True)
+    create_date = db.Column(db.DateTime, default=datetime.utcnow)
+
+    approver = db.relationship('User', foreign_keys=[approver_uid])
+
+
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    __table_args__ = {'schema': 'sm'}
+
+    notification_uid = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    user_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=False)
+    ticket_uid = db.Column(db.String(36), db.ForeignKey('sm.tickets.ticket_uid'), nullable=True)
+    message = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    create_date = db.Column(db.DateTime, default=datetime.utcnow)
+
+    ticket_rel = db.relationship('Ticket', foreign_keys=[ticket_uid])
+
+
+class TicketTemplate(db.Model):
+    __tablename__ = 'ticket_templates'
+    __table_args__ = {'schema': 'sm'}
+
+    template_uid = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    template_name = db.Column(db.String(200), nullable=False)
+    catalog_uid = db.Column(db.String(36), db.ForeignKey('sm.service_catalog.catalog_uid'), nullable=False)
+    summary = db.Column(db.String(500), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.String(20), nullable=True)
+    is_public = db.Column(db.Boolean, default=False)
+    created_by = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=False)
+    create_date = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class AuditLog(db.Model):
+    __tablename__ = 'audit_log'
+    __table_args__ = {'schema': 'sm'}
+
+    audit_uid = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    user_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=True)
+    action = db.Column(db.String(64), nullable=False)
+    entity_type = db.Column(db.String(64), nullable=True)
+    entity_uid = db.Column(db.String(36), nullable=True)
+    details = db.Column(db.Text, nullable=True)
+    ip_address = db.Column(db.String(64), nullable=True)
+    create_date = db.Column(db.DateTime, default=datetime.utcnow)

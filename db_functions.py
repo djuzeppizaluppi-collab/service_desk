@@ -13,8 +13,10 @@ import random
 import string
 from sqlalchemy import text
 from werkzeug.security import generate_password_hash, check_password_hash
-from models import db, User, Password, UserRole, WorkGroup, UserWorkGroup, gen_uuid
-from datetime import datetime
+from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
+                    Notification, AuditLog, TicketApproval, ApprovalRoute, ApprovalStep,
+                    gen_uuid)
+from datetime import datetime, timedelta
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +141,8 @@ def generate_ticket_number() -> str:
 # ---------------------------------------------------------------------------
 def create_user_db(last_name, first_name, middle_name, email, mobile,
                    work_phone, gender, title, department, company,
-                   role='user', work_group_uid=None, creator_uid=None) -> tuple:
+                   role='user', work_group_uid=None, manager_uid=None,
+                   creator_uid=None, avatar='cat') -> tuple:
     """
     Creates a user.  Tries sm.create_user() first; falls back to manual INSERT.
 
@@ -167,6 +170,8 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
                 _set_password_hash(user.user_uid, temp_password)
                 _ensure_role(user.user_uid, role, creator_uid)
                 _ensure_work_group(user.user_uid, work_group_uid)
+                user.manager_uid = manager_uid
+                user.avatar = avatar or user.avatar or 'cat'
                 db.session.commit()
                 return user_name, temp_password
 
@@ -193,6 +198,8 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
         title=title or None,
         department=department or None,
         company=company or None,
+        manager_uid=manager_uid,
+        avatar=avatar or 'cat',
         create_by=sys_uid,
         update_by=sys_uid,
     )
@@ -296,3 +303,111 @@ def add_ticket_history(ticket_uid, field_name, old_value, new_value, changed_by_
         changed_by=changed_by_uid,
     )
     db.session.add(h)
+
+
+def compute_deadline(catalog):
+    """Estimate ticket deadline from linked SLA policy."""
+    hours = 24
+    if getattr(catalog, 'sla', None) and getattr(catalog.sla, 'resolution_time_hours', None):
+        hours = catalog.sla.resolution_time_hours
+    elif getattr(catalog, 'priority', None) == 'critical':
+        hours = 4
+    elif getattr(catalog, 'priority', None) == 'high':
+        hours = 8
+    elif getattr(catalog, 'priority', None) == 'low':
+        hours = 72
+    return datetime.utcnow() + timedelta(hours=hours)
+
+
+def notify(user_uid, message, ticket_uid=None):
+    db.session.add(Notification(
+        user_uid=user_uid,
+        message=message,
+        ticket_uid=ticket_uid,
+    ))
+
+
+def notify_ticket_update(ticket, message, exclude_uid=None):
+    recipients = {ticket.requester_uid, ticket.recipient_uid, ticket.performer_uid}
+    recipients = {uid for uid in recipients if uid and uid != exclude_uid}
+    for uid in recipients:
+        notify(uid, message, ticket_uid=ticket.ticket_uid)
+
+
+def audit(user_uid, action, entity_type=None, entity_uid=None, details=None, ip=None):
+    db.session.add(AuditLog(
+        user_uid=user_uid,
+        action=action,
+        entity_type=entity_type,
+        entity_uid=entity_uid,
+        details=details,
+        ip_address=ip,
+    ))
+
+
+def create_approval_chain(ticket, catalog, requester):
+    from models import User
+    route = ApprovalRoute.query.filter_by(catalog_uid=catalog.catalog_uid, is_active=True).first()
+    if route:
+        steps = ApprovalStep.query.filter_by(route_uid=route.route_uid).order_by(ApprovalStep.step_order).all()
+        for step in steps:
+            approver_uid = step.approver_uid
+            if not approver_uid and step.approver_role:
+                candidate = User.query.join(UserRole).filter(
+                    UserRole.role == step.approver_role,
+                    User.is_deactivated == False
+                ).first()
+                approver_uid = candidate.user_uid if candidate else None
+            db.session.add(TicketApproval(
+                ticket_uid=ticket.ticket_uid,
+                step_order=step.step_order,
+                step_name=step.step_name or f'Шаг {step.step_order}',
+                approver_uid=approver_uid,
+                status='pending',
+            ))
+        return
+
+    approver_uid = requester.manager_uid
+    if not approver_uid:
+        manager = User.query.join(UserRole).filter(UserRole.role.in_(['manager', 'admin'])).first()
+        approver_uid = manager.user_uid if manager else None
+    db.session.add(TicketApproval(
+        ticket_uid=ticket.ticket_uid,
+        step_order=1,
+        step_name='Согласование руководителя',
+        approver_uid=approver_uid,
+        status='pending',
+    ))
+
+
+def process_approval_decision(ticket, approval, decision, comment, actor_uid):
+    valid = {'approved', 'rejected'}
+    if decision not in valid:
+        raise ValueError('Недопустимое решение согласования')
+    old_status = approval.status
+    approval.status = decision
+    approval.comment = comment or None
+    approval.decided_at = datetime.utcnow()
+    add_ticket_history(ticket.ticket_uid, 'approval', old_status, decision, actor_uid)
+
+    if decision == 'rejected':
+        previous = ticket.status
+        ticket.status = 'rejected'
+        add_ticket_history(ticket.ticket_uid, 'status', previous, 'rejected', actor_uid)
+        notify_ticket_update(ticket, f'Заявка {ticket.ticket_number} отклонена', exclude_uid=actor_uid)
+        return
+
+    pending = TicketApproval.query.filter_by(ticket_uid=ticket.ticket_uid, status='pending').order_by(
+        TicketApproval.step_order
+    ).all()
+    if pending:
+        nxt = pending[0]
+        if nxt.approver_uid:
+            notify(nxt.approver_uid,
+                   f'Требуется согласование заявки {ticket.ticket_number}',
+                   ticket_uid=ticket.ticket_uid)
+    else:
+        previous = ticket.status
+        ticket.status = 'approved'
+        add_ticket_history(ticket.ticket_uid, 'status', previous, 'approved', actor_uid)
+        notify_ticket_update(ticket, f'Заявка {ticket.ticket_number} согласована', exclude_uid=actor_uid)
