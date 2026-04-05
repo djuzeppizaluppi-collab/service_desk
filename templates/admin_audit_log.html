@@ -19,7 +19,7 @@
       </thead>
       <tbody>
         {% for log in logs.items %}
-        {% set u = User.query.get(log.user_uid) %}
+        {% set u = users_by_uid.get(log.user_uid) %}
         <tr>
           <td class="td-date">{{ log.create_date|datefmt }}</td>
           <td>
@@ -30,7 +30,7 @@
             {% else %}—{% endif %}
           </td>
           <td><span class="tag">{{ log.action }}</span></td>
-          <td>{{ log.object_type or '—' }}</td>
+          <td>{{ log.entity_type or '—' }}</td>
           <td>{{ log.details or '—' }}</td>
           <td class="td-mono text-muted">{{ log.ip_address or '—' }}</td>
         </tr>
