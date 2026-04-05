@@ -1451,3 +1451,231 @@ input, select, textarea { font-family: inherit; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* =========================================================
+   CATALOG ACCORDION (home page)
+   ========================================================= */
+.catalog-accordion { display: flex; flex-direction: column; gap: 6px; }
+
+.cat-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color .15s;
+}
+.cat-item:hover { border-color: var(--border-light); }
+.cat-item.open  { border-color: var(--accent); }
+
+.cat-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s;
+}
+.cat-header:hover { background: var(--bg-hover); }
+.cat-item.open .cat-header { background: rgba(99,102,241,.06); }
+
+.cat-header-icon { display: flex; align-items: center; color: var(--accent); }
+.cat-header-icon svg { width: 20px; height: 20px; }
+
+.cat-header-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.cat-header-name { font-size: 15px; font-weight: 600; }
+.cat-header-desc { font-size: 12px; color: var(--text-muted); }
+
+.cat-header-count {
+  font-size: 11px;
+  background: var(--bg-sidebar);
+  color: var(--text-dim);
+  border-radius: 99px;
+  padding: 2px 8px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cat-item.open .cat-header-count { background: rgba(99,102,241,.15); color: var(--accent); }
+
+.cat-chevron {
+  width: 16px !important;
+  height: 16px !important;
+  color: var(--text-dim);
+  transition: transform .25s ease;
+  flex-shrink: 0;
+}
+.cat-item.open .cat-chevron { transform: rotate(180deg); }
+
+.cat-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height .3s cubic-bezier(.4,0,.2,1);
+}
+
+.cat-services {
+  padding: 8px 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* =========================================================
+   SEARCH SUGGESTIONS DROPDOWN
+   ========================================================= */
+.search-suggestions-wrap {
+  position: relative;
+  flex: 1;
+}
+
+.search-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,.25);
+  z-index: 300;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.sug-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+}
+.sug-section-title svg { width: 12px; height: 12px; }
+
+.sug-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: background .1s;
+  border-bottom: 1px solid var(--border);
+}
+.sug-item:last-child { border-bottom: none; }
+.sug-item:hover { background: var(--bg-hover); }
+
+.sug-icon { width: 14px; height: 14px; color: var(--text-dim); flex-shrink: 0; }
+.sug-num  { font-size: 12px; color: var(--text-dim); font-family: monospace; min-width: 80px; flex-shrink: 0; }
+.sug-text { flex: 1; font-size: 13px; color: var(--text); }
+.sug-meta { font-size: 11px; color: var(--text-dim); }
+.sug-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 99px;
+  background: var(--bg-sidebar);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.sug-empty { padding: 14px; text-align: center; font-size: 13px; color: var(--text-dim); }
+
+/* =========================================================
+   APPROVALS PAGE
+   ========================================================= */
+.appr-tab { }
+
+.appr-list { display: flex; flex-direction: column; gap: 12px; }
+
+.appr-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.appr-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.appr-step-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+
+.appr-card-body { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+
+.appr-ticket-info {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background .1s;
+}
+.appr-ticket-info:hover { background: var(--bg-hover); }
+.appr-ticket-num { font-size: 12px; color: var(--text-dim); font-family: monospace; }
+.appr-ticket-summary { font-size: 14px; font-weight: 500; }
+
+.appr-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.appr-meta span { display: flex; align-items: center; gap: 4px; }
+.appr-meta svg { width: 12px; height: 12px; }
+
+.appr-actions {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.appr-comment { font-size: 13px; resize: vertical; }
+.appr-btns { display: flex; gap: 8px; }
+
+/* Table styles for history / all tabs */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.data-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: middle;
+}
+.data-table tbody tr:last-child td { border-bottom: none; }
+.clickable-row { cursor: pointer; transition: background .1s; }
+.clickable-row:hover { background: var(--bg-hover); }
+.ticket-num-sm { font-family: monospace; font-size: 12px; color: var(--text-dim); }
+
+/* count badge on nav */
+.nav-link .count-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  min-width: unset;
+  margin-left: 2px;
+}

@@ -57,7 +57,7 @@ db.init_app(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-login_manager.login_message = 'Пожалуйста, войдите в систему'
+login_manager.login_message = ''
 login_manager.login_message_category = 'info'
 
 
@@ -267,6 +267,11 @@ def init_db():
         ALTER TABLE IF EXISTS sm.tickets
             ADD COLUMN IF NOT EXISTS deadline_at timestamptz NULL
     """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.users
+            ALTER COLUMN mobile TYPE varchar(20),
+            ALTER COLUMN work_phone TYPE varchar(20)
+    """))
     db.session.commit()
 
     SYS = '00000000-0000-0000-0000-000000000001'
@@ -372,7 +377,9 @@ def login():
     if request.method == 'POST':
         login_val = request.form.get('login', '').strip()
         password  = request.form.get('password', '')
-        user = User.query.filter_by(user_name=login_val).first()
+        user = User.query.filter(
+            db.func.lower(User.user_name) == login_val.lower()
+        ).first()
         if not user or user.is_deactivated or user.is_temp_deactivated:
             error = 'Неверный логин или пароль'
         else:
@@ -473,6 +480,99 @@ def home():
     return render_template('home.html', categories=categories,
                            my_tickets=my_tickets, search_results=search_results,
                            view=view, q=q)
+
+
+# ============================================================
+# LIVE SEARCH API
+# ============================================================
+
+@app.route('/api/search')
+@login_required
+def api_search():
+    q = request.args.get('q', '').strip()
+    if len(q) < 2:
+        return jsonify({'tickets': [], 'catalog': []})
+
+    # Catalog: services + categories matching query
+    cat_q = ServiceCatalog.query.filter(
+        ServiceCatalog.is_active == True,
+        db.or_(
+            ServiceCatalog.catalog_name.ilike(f'%{q}%'),
+            ServiceCatalog.catalog_description.ilike(f'%{q}%'),
+        )
+    ).all()
+    # Sort: starts-with first, then contains; services before categories
+    def _cat_rank(c):
+        starts = c.catalog_name.lower().startswith(q.lower())
+        is_svc = c.catalog_type == 'service'
+        return (0 if starts else 1, 0 if is_svc else 1, c.catalog_name)
+    cat_q = sorted(cat_q, key=_cat_rank)[:8]
+
+    # Tickets matching query (restricted by role)
+    tq = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid, isouter=True)
+    if not is_specialist():
+        tq = tq.filter(db.or_(
+            Ticket.requester_uid == current_user.user_uid,
+            Ticket.recipient_uid == current_user.user_uid,
+        ))
+    tickets = tq.filter(db.or_(
+        Ticket.ticket_number.ilike(f'%{q}%'),
+        Ticket.summary.ilike(f'%{q}%'),
+    )).order_by(Ticket.created_at.desc()).limit(7).all()
+
+    return jsonify({
+        'tickets': [{
+            'uid': t.ticket_uid,
+            'number': t.ticket_number,
+            'summary': t.summary,
+            'status': t.status,
+            'catalog': t.catalog.catalog_name if t.catalog else '—',
+        } for t in tickets],
+        'catalog': [{
+            'uid': c.catalog_uid,
+            'name': c.catalog_name,
+            'type': c.catalog_type,
+            'parent': c.parent.catalog_name if c.parent else None,
+            'is_service': c.catalog_type == 'service',
+        } for c in cat_q],
+    })
+
+
+# ============================================================
+# APPROVALS PAGE
+# ============================================================
+
+@app.route('/approvals')
+@login_required
+def approvals():
+    # Items this user must approve (pending, assigned to them)
+    to_approve = TicketApproval.query.filter_by(
+        approver_uid=current_user.user_uid, status='pending'
+    ).order_by(TicketApproval.create_date.desc()).all()
+
+    # Current user's own tickets awaiting any approval
+    waiting = Ticket.query.filter_by(
+        requester_uid=current_user.user_uid, status='pending_approval'
+    ).order_by(Ticket.created_at.desc()).all()
+
+    # History: approvals decided by current user
+    my_history = TicketApproval.query.filter(
+        TicketApproval.approver_uid == current_user.user_uid,
+        TicketApproval.status.in_(['approved', 'rejected']),
+    ).order_by(TicketApproval.decided_at.desc()).limit(50).all()
+
+    # Admin sees all approval records
+    all_approvals = None
+    if current_user.role == 'admin':
+        all_approvals = TicketApproval.query.order_by(
+            TicketApproval.create_date.desc()
+        ).limit(200).all()
+
+    return render_template('approvals.html',
+                           to_approve=to_approve,
+                           waiting=waiting,
+                           my_history=my_history,
+                           all_approvals=all_approvals)
 
 
 # ============================================================
@@ -1211,9 +1311,19 @@ def create_user():
         wg_uid      = request.form.get('work_group_uid') or None
         manager_uid = request.form.get('manager_uid') or None
 
+        form_data = {
+            'last_name': last_name, 'first_name': first_name,
+            'middle_name': middle_name or '', 'email': email,
+            'mobile': request.form.get('mobile', '').strip(),
+            'work_phone': request.form.get('work_phone', '').strip(),
+            'gender': gender or '', 'title': title or '',
+            'department': department or '', 'company': company or '',
+            'role': role, 'work_group_uid': wg_uid or '',
+            'manager_uid': manager_uid or '',
+        }
         if User.query.filter_by(email=email).first():
             return render_template('create_user.html', work_groups=work_groups,
-                                   all_users=all_users,
+                                   all_users=all_users, form_data=form_data,
                                    error='Пользователь с таким email уже существует')
         try:
             user_name, temp_pw = create_user_db(
@@ -1230,8 +1340,22 @@ def create_user():
                                    temp_login=user_name, temp_password=temp_pw)
         except Exception as e:
             db.session.rollback()
+            err_str = str(e)
+            if 'value too long' in err_str or 'StringDataRightTruncation' in err_str:
+                error = 'Одно из полей слишком длинное (телефон, должность и т.п.). Проверьте данные.'
+            elif 'unique' in err_str.lower() or 'UniqueViolation' in err_str:
+                if 'email' in err_str:
+                    error = 'Пользователь с таким email уже существует.'
+                elif 'user_name' in err_str:
+                    error = 'Сгенерированный логин уже занят, попробуйте ещё раз.'
+                else:
+                    error = 'Нарушение уникальности: такие данные уже есть в системе.'
+            elif 'not-null' in err_str.lower() or 'null value' in err_str.lower():
+                error = 'Не заполнено обязательное поле. Проверьте Фамилию, Имя и Email.'
+            else:
+                error = 'Ошибка при создании пользователя. Проверьте введённые данные.'
             return render_template('create_user.html', work_groups=work_groups,
-                                   all_users=all_users, error=f'Ошибка: {e}')
+                                   all_users=all_users, form_data=form_data, error=error)
 
     return render_template('create_user.html', work_groups=work_groups,
                            all_users=all_users, error=None)
@@ -1392,13 +1516,40 @@ def edit_category(cat_uid):
                            work_groups=work_groups, top_cats=top_cats, slas=slas)
 
 
+@app.route('/admin/toggle-category/<cat_uid>', methods=['POST'])
+@login_required
+def toggle_category(cat_uid):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    cat = ServiceCatalog.query.get_or_404(cat_uid)
+    cat.is_active = not cat.is_active
+    db.session.commit()
+    return jsonify({'success': True, 'is_active': cat.is_active})
+
+
 @app.route('/admin/delete-category/<cat_uid>', methods=['POST'])
 @login_required
 def delete_category(cat_uid):
     if current_user.role != 'admin':
         return jsonify({'error': 'Доступ запрещён'}), 403
     cat = ServiceCatalog.query.get_or_404(cat_uid)
-    cat.is_active = False
+    ticket_count = Ticket.query.filter_by(catalog_uid=cat_uid).count()
+    if ticket_count > 0:
+        return jsonify({
+            'error': f'Нельзя удалить: к этой категории привязано {ticket_count} заявок. '
+                     f'Сначала скройте её (глазик), чтобы запретить новые заявки.'
+        }), 400
+    # Also delete child services if this is a top-level category
+    for child in cat.children.all():
+        if Ticket.query.filter_by(catalog_uid=child.catalog_uid).count() == 0:
+            db.session.delete(child)
+        else:
+            return jsonify({
+                'error': f'Нельзя удалить: дочерняя услуга «{child.catalog_name}» имеет привязанные заявки.'
+            }), 400
+    audit(current_user.user_uid, 'delete_category', 'service_catalog', cat_uid,
+          f'Удалена категория {cat.catalog_name}', request.remote_addr)
+    db.session.delete(cat)
     db.session.commit()
     return jsonify({'success': True})
 

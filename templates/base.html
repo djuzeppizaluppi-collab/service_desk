@@ -28,6 +28,9 @@
         <i data-feather="layout"></i> Заявки
       </a>
       {% endif %}
+      <a href="{{ url_for('approvals') }}" class="nav-link {% if request.endpoint == 'approvals' %}active{% endif %}">
+        <i data-feather="check-square"></i> Согласования
+      </a>
     </div>
 
     <!-- RIGHT: notifications, admin menu, profile, logout -->
