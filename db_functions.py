@@ -144,7 +144,7 @@ def generate_ticket_number() -> str:
 def create_user_db(last_name, first_name, middle_name, email, mobile,
                    work_phone, gender, title, department, company,
                    role='user', work_group_uid=None, manager_uid=None,
-                   creator_uid=None, avatar='cat') -> tuple:
+                   creator_uid=None) -> tuple:
     """
     Creates a user.  Tries sm.create_user() first; falls back to manual INSERT.
 
@@ -173,7 +173,6 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
                 _ensure_role(user.user_uid, role, creator_uid)
                 _ensure_work_group(user.user_uid, work_group_uid)
                 user.manager_uid = manager_uid
-                user.avatar = avatar or user.avatar or 'cat'
                 db.session.commit()
                 return user_name, temp_password
 
@@ -201,7 +200,6 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
         department=department or None,
         company=company or None,
         manager_uid=manager_uid,
-        avatar=avatar or 'cat',
         create_by=sys_uid,
         update_by=sys_uid,
     )

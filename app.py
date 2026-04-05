@@ -4,7 +4,7 @@ Flask + PostgreSQL + SQLAlchemy
 """
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 from flask import (Flask, render_template, request, redirect, jsonify,
@@ -256,8 +256,7 @@ def init_db():
     # Lightweight compatibility migration for older databases.
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.users
-            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL,
-            ADD COLUMN IF NOT EXISTS avatar varchar(32) NULL DEFAULT 'cat'
+            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL
     """))
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.service_catalog
@@ -639,7 +638,9 @@ def tickets_board():
             pass
     if fd_to:
         try:
-            query = query.filter(Ticket.created_at <= datetime.strptime(fd_to, '%Y-%m-%d'))
+            query = query.filter(
+                Ticket.created_at < datetime.strptime(fd_to, '%Y-%m-%d') + timedelta(days=1)
+            )
         except ValueError:
             pass
 
@@ -853,11 +854,13 @@ def get_ticket(ticket_uid):
 @login_required
 def update_ticket(ticket_uid):
     ticket = Ticket.query.get_or_404(ticket_uid)
-    if not _can_edit_ticket(ticket):
-        return jsonify({'error': 'Доступ запрещён'}), 403
-
     data   = request.get_json() or {}
     action = data.get('action')
+
+    # Approve only needs the user to be a pending approver — checked inside the branch.
+    # All other mutating actions require edit permission.
+    if action != 'approve' and not _can_edit_ticket(ticket):
+        return jsonify({'error': 'Доступ запрещён'}), 403
     now    = datetime.utcnow()
 
     if action == 'take':
@@ -937,26 +940,40 @@ def update_ticket(ticket_uid):
         db.session.commit()
         return jsonify({'success': True, 'deleted': True})
 
-    elif action == 'bulk_status':
-        if not is_specialist():
-            return jsonify({'error': 'Доступ запрещён'}), 403
-        uids       = data.get('ticket_uids', [])
-        new_status = data.get('status')
-        valid = ['in_progress', 'on_hold', 'resolved', 'closed', 'cancelled']
-        if new_status not in valid:
-            return jsonify({'error': 'Недопустимый статус'}), 400
-        Ticket.query.filter(Ticket.ticket_uid.in_(uids)).update(
-            {'status': new_status, 'updated_at': now, 'updated_by': current_user.user_uid},
-            synchronize_session=False,
-        )
-        db.session.commit()
-        return jsonify({'success': True})
-
     else:
         return jsonify({'error': 'Неизвестное действие'}), 400
 
     ticket.updated_at = now
     ticket.updated_by = current_user.user_uid
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+# ============================================================
+# TICKET API — BULK UPDATE
+# ============================================================
+
+@app.route('/api/tickets/bulk', methods=['POST'])
+@login_required
+def bulk_update_tickets():
+    if not is_specialist():
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    data       = request.get_json() or {}
+    action     = data.get('action')
+    new_status = data.get('status')
+    uids       = data.get('ticket_uids', [])
+    valid_statuses = ['in_progress', 'on_hold', 'resolved', 'closed', 'cancelled']
+    if action != 'bulk_status':
+        return jsonify({'error': 'Неизвестное действие'}), 400
+    if new_status not in valid_statuses:
+        return jsonify({'error': 'Недопустимый статус'}), 400
+    if not uids:
+        return jsonify({'error': 'Нет заявок для обновления'}), 400
+    now = datetime.utcnow()
+    Ticket.query.filter(Ticket.ticket_uid.in_(uids)).update(
+        {'status': new_status, 'updated_at': now, 'updated_by': current_user.user_uid},
+        synchronize_session=False,
+    )
     db.session.commit()
     return jsonify({'success': True})
 
@@ -1233,15 +1250,17 @@ def edit_user(user_uid):
     ).order_by(User.last_name).all()
 
     if request.method == 'POST':
-        user.first_name     = request.form.get('first_name', '').strip() or user.first_name
-        user.last_name      = request.form.get('last_name', '').strip() or user.last_name
-        user.middel_name    = request.form.get('middle_name', '').strip() or user.middel_name
-        user.email          = request.form.get('email', '').strip() or user.email
-        user.mobile         = format_mobile(request.form.get('mobile', '')) or user.mobile
-        user.work_phone     = request.form.get('work_phone', '').strip() or user.work_phone
-        user.title          = request.form.get('title', '').strip() or user.title
-        user.department     = request.form.get('department', '').strip() or user.department
-        user.company        = request.form.get('company', '').strip() or user.company
+        # Required fields: keep old value only if form sends empty string
+        user.first_name  = request.form.get('first_name', '').strip() or user.first_name
+        user.last_name   = request.form.get('last_name', '').strip() or user.last_name
+        user.email       = request.form.get('email', '').strip() or user.email
+        # Optional fields: allow clearing by setting to None when blank
+        user.middel_name = request.form.get('middle_name', '').strip() or None
+        user.mobile      = format_mobile(request.form.get('mobile', '').strip()) or None
+        user.work_phone  = request.form.get('work_phone', '').strip() or None
+        user.title       = request.form.get('title', '').strip() or None
+        user.department  = request.form.get('department', '').strip() or None
+        user.company     = request.form.get('company', '').strip() or None
         user.manager_uid    = request.form.get('manager_uid') or None
         user.is_deactivated = 'is_deactivated' in request.form
         user.update_date    = datetime.utcnow()
@@ -1438,7 +1457,9 @@ def admin_audit_log():
     page = request.args.get('page', 1, type=int)
     logs = AuditLog.query.order_by(AuditLog.create_date.desc()).paginate(
         page=page, per_page=50, error_out=False)
-    return render_template('admin_audit_log.html', logs=logs)
+    uids = {log.user_uid for log in logs.items if log.user_uid}
+    users_by_uid = {u.user_uid: u for u in User.query.filter(User.user_uid.in_(uids)).all()}
+    return render_template('admin_audit_log.html', logs=logs, users_by_uid=users_by_uid)
 
 
 # ============================================================
@@ -1446,4 +1467,5 @@ def admin_audit_log():
 # ============================================================
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug, host='0.0.0.0', port=5000)

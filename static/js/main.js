@@ -4,6 +4,17 @@
 
 'use strict';
 
+// ---- HTML escaping to prevent XSS when inserting user content into innerHTML ----
+function esc(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ---- Toast notifications ----
 function showToast(msg, type = 'info', duration = 3500) {
   let container = document.getElementById('toastContainer');
@@ -127,10 +138,10 @@ function renderNotifications(data) {
     return;
   }
   list.innerHTML = data.items.map(n => `
-    <div class="notif-item" onclick="notifClick('${n.uid}', '${n.ticket_uid || ''}')">
-      <div class="notif-msg">${n.message}</div>
-      ${n.ticket_number ? `<div class="notif-num">${n.ticket_number}</div>` : ''}
-      <div class="notif-date">${n.created_at}</div>
+    <div class="notif-item" onclick="notifClick('${esc(n.uid)}', '${esc(n.ticket_uid || '')}')">
+      <div class="notif-msg">${esc(n.message)}</div>
+      ${n.ticket_number ? `<div class="notif-num">${esc(n.ticket_number)}</div>` : ''}
+      <div class="notif-date">${esc(n.created_at)}</div>
     </div>
   `).join('');
 }
@@ -343,11 +354,11 @@ function renderTicketModal(t) {
   document.getElementById('modalHistory').innerHTML = t.history.length
     ? t.history.map(h => `
       <div class="history-item">
-        <span class="history-field">${h.field}</span>
+        <span class="history-field">${esc(h.field)}</span>
         <span class="history-arrow">→</span>
-        <span class="history-new">${h.new || '—'}</span>
-        <span class="history-by">${h.by}</span>
-        <span class="history-date">${h.date}</span>
+        <span class="history-new">${esc(h.new) || '—'}</span>
+        <span class="history-by">${esc(h.by)}</span>
+        <span class="history-date">${esc(h.date)}</span>
       </div>
     `).join('')
     : '<div class="history-empty">Нет истории</div>';
@@ -362,13 +373,13 @@ function renderComments(comments) {
   el.innerHTML = comments.map(c => `
     <div class="comment ${c.is_internal ? 'comment-internal' : ''}">
       <div class="comment-header">
-        <a href="/user/${c.author_uid}" class="comment-author">
-          ${c.author}
+        <a href="/user/${esc(c.author_uid)}" class="comment-author">
+          ${esc(c.author)}
         </a>
         ${c.is_internal ? '<span class="comment-internal-badge">Внутренний</span>' : ''}
-        <span class="comment-date">${c.created_at}</span>
+        <span class="comment-date">${esc(c.created_at)}</span>
       </div>
-      <div class="comment-text">${c.text.replace(/\n/g, '<br>')}</div>
+      <div class="comment-text">${esc(c.text).replace(/\n/g, '<br>')}</div>
     </div>
   `).join('');
 }

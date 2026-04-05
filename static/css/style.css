@@ -69,18 +69,6 @@ a:hover { color: var(--accent-hover); }
 button { cursor: pointer; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
 
-/* Avatars removed by request */
-.nav-avatar,
-.td-avatar,
-.card-avatar,
-.profile-avatar-section,
-.user-profile-avatar,
-.avatar-picker,
-.avatar-grid,
-.avatar-option {
-  display: none !important;
-}
-
 /* =========================================================
    NAVBAR
    ========================================================= */
@@ -196,7 +184,6 @@ input, select, textarea { font-family: inherit; }
 }
 .nav-profile:hover { background: var(--bg-hover); color: var(--text); }
 .nav-profile.active { color: var(--text); }
-.nav-avatar { font-size: 18px; }
 .nav-logout {
   display: flex;
   align-items: center;
@@ -687,7 +674,6 @@ input, select, textarea { font-family: inherit; }
 .row-deactivated { opacity: .5; }
 .row-overdue td { background: rgba(239,68,68,.04); }
 .table-empty { text-align: center; color: var(--text-muted); padding: 30px; }
-.td-avatar { font-size: 20px; text-align: center; width: 40px; }
 .td-mono { font-family: monospace; font-size: 12px; }
 .td-actions { display: flex; gap: 4px; align-items: center; }
 .td-date { white-space: nowrap; color: var(--text-muted); font-size: 12px; }
@@ -1024,13 +1010,6 @@ input, select, textarea { font-family: inherit; }
   gap: 6px;
   flex-wrap: wrap;
 }
-.card-avatar {
-  font-size: 16px;
-  text-decoration: none;
-  transition: transform .15s;
-  display: inline-block;
-}
-.card-avatar:hover { transform: scale(1.2); }
 .card-unassigned { font-size: 11px; color: var(--text-dim); }
 .card-deadline {
   display: inline-flex;
@@ -1312,8 +1291,6 @@ input, select, textarea { font-family: inherit; }
   gap: 16px;
   align-self: start;
 }
-.profile-avatar-section { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.profile-avatar-big { font-size: 56px; line-height: 1; }
 .profile-name { font-size: 18px; font-weight: 700; text-align: center; }
 .profile-role { text-align: center; font-size: 12px; color: var(--text-muted); }
 .profile-info-grid { display: flex; flex-direction: column; gap: 8px; }
@@ -1341,34 +1318,6 @@ input, select, textarea { font-family: inherit; }
 .profile-pwd-section svg { width: 13px; height: 13px; }
 .profile-tickets { }
 
-/* Avatar picker */
-.avatar-picker {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px;
-}
-.avatar-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
-  margin-bottom: 10px;
-}
-.avatar-option {
-  font-size: 22px;
-  padding: 6px;
-  border-radius: var(--radius-sm);
-  border: 2px solid transparent;
-  background: none;
-  cursor: pointer;
-  transition: all .12s;
-  line-height: 1;
-}
-.avatar-option:hover { background: var(--bg-hover); border-color: var(--border); }
-.avatar-option.selected { border-color: var(--accent); background: var(--accent-dim); }
-.avatar-picker-actions { display: flex; justify-content: flex-end; gap: 6px; }
-.mb-2 { margin-bottom: 12px; }
-
 /* Public profile */
 .user-profile-card {
   padding: 28px;
@@ -1380,7 +1329,6 @@ input, select, textarea { font-family: inherit; }
   gap: 16px;
   margin-bottom: 20px;
 }
-.user-profile-avatar { font-size: 52px; line-height: 1; }
 .user-profile-info h2 { font-size: 20px; font-weight: 700; }
 .user-role-badge { display: inline-block; margin-top: 4px; }
 .user-title { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
