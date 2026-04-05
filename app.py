@@ -256,8 +256,7 @@ def init_db():
     # Lightweight compatibility migration for older databases.
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.users
-            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL,
-            ADD COLUMN IF NOT EXISTS avatar varchar(32) NULL DEFAULT 'cat'
+            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL
     """))
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.service_catalog
