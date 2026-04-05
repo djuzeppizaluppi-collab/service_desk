@@ -57,7 +57,7 @@ db.init_app(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-login_manager.login_message = 'Пожалуйста, войдите в систему'
+login_manager.login_message = ''
 login_manager.login_message_category = 'info'
 
 
@@ -267,6 +267,11 @@ def init_db():
         ALTER TABLE IF EXISTS sm.tickets
             ADD COLUMN IF NOT EXISTS deadline_at timestamptz NULL
     """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.users
+            ALTER COLUMN mobile TYPE varchar(20),
+            ALTER COLUMN work_phone TYPE varchar(20)
+    """))
     db.session.commit()
 
     SYS = '00000000-0000-0000-0000-000000000001'
@@ -372,7 +377,9 @@ def login():
     if request.method == 'POST':
         login_val = request.form.get('login', '').strip()
         password  = request.form.get('password', '')
-        user = User.query.filter_by(user_name=login_val).first()
+        user = User.query.filter(
+            db.func.lower(User.user_name) == login_val.lower()
+        ).first()
         if not user or user.is_deactivated or user.is_temp_deactivated:
             error = 'Неверный логин или пароль'
         else:
@@ -1211,9 +1218,19 @@ def create_user():
         wg_uid      = request.form.get('work_group_uid') or None
         manager_uid = request.form.get('manager_uid') or None
 
+        form_data = {
+            'last_name': last_name, 'first_name': first_name,
+            'middle_name': middle_name or '', 'email': email,
+            'mobile': request.form.get('mobile', '').strip(),
+            'work_phone': request.form.get('work_phone', '').strip(),
+            'gender': gender or '', 'title': title or '',
+            'department': department or '', 'company': company or '',
+            'role': role, 'work_group_uid': wg_uid or '',
+            'manager_uid': manager_uid or '',
+        }
         if User.query.filter_by(email=email).first():
             return render_template('create_user.html', work_groups=work_groups,
-                                   all_users=all_users,
+                                   all_users=all_users, form_data=form_data,
                                    error='Пользователь с таким email уже существует')
         try:
             user_name, temp_pw = create_user_db(
@@ -1230,8 +1247,22 @@ def create_user():
                                    temp_login=user_name, temp_password=temp_pw)
         except Exception as e:
             db.session.rollback()
+            err_str = str(e)
+            if 'value too long' in err_str or 'StringDataRightTruncation' in err_str:
+                error = 'Одно из полей слишком длинное (телефон, должность и т.п.). Проверьте данные.'
+            elif 'unique' in err_str.lower() or 'UniqueViolation' in err_str:
+                if 'email' in err_str:
+                    error = 'Пользователь с таким email уже существует.'
+                elif 'user_name' in err_str:
+                    error = 'Сгенерированный логин уже занят, попробуйте ещё раз.'
+                else:
+                    error = 'Нарушение уникальности: такие данные уже есть в системе.'
+            elif 'not-null' in err_str.lower() or 'null value' in err_str.lower():
+                error = 'Не заполнено обязательное поле. Проверьте Фамилию, Имя и Email.'
+            else:
+                error = 'Ошибка при создании пользователя. Проверьте введённые данные.'
             return render_template('create_user.html', work_groups=work_groups,
-                                   all_users=all_users, error=f'Ошибка: {e}')
+                                   all_users=all_users, form_data=form_data, error=error)
 
     return render_template('create_user.html', work_groups=work_groups,
                            all_users=all_users, error=None)
