@@ -483,6 +483,99 @@ def home():
 
 
 # ============================================================
+# LIVE SEARCH API
+# ============================================================
+
+@app.route('/api/search')
+@login_required
+def api_search():
+    q = request.args.get('q', '').strip()
+    if len(q) < 2:
+        return jsonify({'tickets': [], 'catalog': []})
+
+    # Catalog: services + categories matching query
+    cat_q = ServiceCatalog.query.filter(
+        ServiceCatalog.is_active == True,
+        db.or_(
+            ServiceCatalog.catalog_name.ilike(f'%{q}%'),
+            ServiceCatalog.catalog_description.ilike(f'%{q}%'),
+        )
+    ).all()
+    # Sort: starts-with first, then contains; services before categories
+    def _cat_rank(c):
+        starts = c.catalog_name.lower().startswith(q.lower())
+        is_svc = c.catalog_type == 'service'
+        return (0 if starts else 1, 0 if is_svc else 1, c.catalog_name)
+    cat_q = sorted(cat_q, key=_cat_rank)[:8]
+
+    # Tickets matching query (restricted by role)
+    tq = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid, isouter=True)
+    if not is_specialist():
+        tq = tq.filter(db.or_(
+            Ticket.requester_uid == current_user.user_uid,
+            Ticket.recipient_uid == current_user.user_uid,
+        ))
+    tickets = tq.filter(db.or_(
+        Ticket.ticket_number.ilike(f'%{q}%'),
+        Ticket.summary.ilike(f'%{q}%'),
+    )).order_by(Ticket.created_at.desc()).limit(7).all()
+
+    return jsonify({
+        'tickets': [{
+            'uid': t.ticket_uid,
+            'number': t.ticket_number,
+            'summary': t.summary,
+            'status': t.status,
+            'catalog': t.catalog.catalog_name if t.catalog else '—',
+        } for t in tickets],
+        'catalog': [{
+            'uid': c.catalog_uid,
+            'name': c.catalog_name,
+            'type': c.catalog_type,
+            'parent': c.parent.catalog_name if c.parent else None,
+            'is_service': c.catalog_type == 'service',
+        } for c in cat_q],
+    })
+
+
+# ============================================================
+# APPROVALS PAGE
+# ============================================================
+
+@app.route('/approvals')
+@login_required
+def approvals():
+    # Items this user must approve (pending, assigned to them)
+    to_approve = TicketApproval.query.filter_by(
+        approver_uid=current_user.user_uid, status='pending'
+    ).order_by(TicketApproval.create_date.desc()).all()
+
+    # Current user's own tickets awaiting any approval
+    waiting = Ticket.query.filter_by(
+        requester_uid=current_user.user_uid, status='pending_approval'
+    ).order_by(Ticket.created_at.desc()).all()
+
+    # History: approvals decided by current user
+    my_history = TicketApproval.query.filter(
+        TicketApproval.approver_uid == current_user.user_uid,
+        TicketApproval.status.in_(['approved', 'rejected']),
+    ).order_by(TicketApproval.decided_at.desc()).limit(50).all()
+
+    # Admin sees all approval records
+    all_approvals = None
+    if current_user.role == 'admin':
+        all_approvals = TicketApproval.query.order_by(
+            TicketApproval.create_date.desc()
+        ).limit(200).all()
+
+    return render_template('approvals.html',
+                           to_approve=to_approve,
+                           waiting=waiting,
+                           my_history=my_history,
+                           all_approvals=all_approvals)
+
+
+# ============================================================
 # CATALOG API
 # ============================================================
 
