@@ -1423,13 +1423,40 @@ def edit_category(cat_uid):
                            work_groups=work_groups, top_cats=top_cats, slas=slas)
 
 
+@app.route('/admin/toggle-category/<cat_uid>', methods=['POST'])
+@login_required
+def toggle_category(cat_uid):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    cat = ServiceCatalog.query.get_or_404(cat_uid)
+    cat.is_active = not cat.is_active
+    db.session.commit()
+    return jsonify({'success': True, 'is_active': cat.is_active})
+
+
 @app.route('/admin/delete-category/<cat_uid>', methods=['POST'])
 @login_required
 def delete_category(cat_uid):
     if current_user.role != 'admin':
         return jsonify({'error': 'Доступ запрещён'}), 403
     cat = ServiceCatalog.query.get_or_404(cat_uid)
-    cat.is_active = False
+    ticket_count = Ticket.query.filter_by(catalog_uid=cat_uid).count()
+    if ticket_count > 0:
+        return jsonify({
+            'error': f'Нельзя удалить: к этой категории привязано {ticket_count} заявок. '
+                     f'Сначала скройте её (глазик), чтобы запретить новые заявки.'
+        }), 400
+    # Also delete child services if this is a top-level category
+    for child in cat.children.all():
+        if Ticket.query.filter_by(catalog_uid=child.catalog_uid).count() == 0:
+            db.session.delete(child)
+        else:
+            return jsonify({
+                'error': f'Нельзя удалить: дочерняя услуга «{child.catalog_name}» имеет привязанные заявки.'
+            }), 400
+    audit(current_user.user_uid, 'delete_category', 'service_catalog', cat_uid,
+          f'Удалена категория {cat.catalog_name}', request.remote_addr)
+    db.session.delete(cat)
     db.session.commit()
     return jsonify({'success': True})
 
