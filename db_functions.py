@@ -131,6 +131,8 @@ def normalize_gender(gender: str):
 def generate_ticket_number() -> str:
     """Generate a sequential ticket number like SD-20240001."""
     from models import Ticket
+    # NOTE: COUNT(*) is non-atomic — under concurrent load two requests may
+    # receive the same number. Consider using a DB sequence for uniqueness.
     count = db.session.execute(text("SELECT COUNT(*) FROM sm.tickets")).scalar() or 0
     year = datetime.utcnow().year
     return f"SD-{year}-{(count + 1):04d}"
