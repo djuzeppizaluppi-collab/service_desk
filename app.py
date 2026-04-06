@@ -15,7 +15,7 @@ from flask_login import (LoginManager, login_user, login_required,
 from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
                     SlaPolicy, ServiceCatalog, ApprovalRoute, ApprovalStep,
                     TicketApproval, Ticket, TicketHistory, TicketParamValue,
-                    Attachment, Notification, TicketTemplate, AuditLog, gen_uuid)
+                    Attachment, Notification, gen_uuid)
 from db_functions import (
     create_user_db, reset_password_db, verify_password,
     _set_password_hash, _ensure_role, _ensure_work_group,
@@ -77,6 +77,12 @@ BOARD_COLUMNS = {
     'done':        ('Завершено',       ['resolved', 'closed', 'cancelled']),
 }
 PRIORITIES = {'low': 'Низкий', 'medium': 'Средний', 'high': 'Высокий', 'critical': 'Критический'}
+ROLE_LABELS = {
+    'user': 'Пользователь',
+    'specialist': 'Task Executor',
+    'manager': 'Manager (Supervisor)',
+    'admin': 'Администратор',
+}
 # ============================================================
 # HELPERS
 # ============================================================
@@ -147,6 +153,10 @@ def status_label_filter(s):
 @app.template_filter('priority_label')
 def priority_label_filter(p):
     return PRIORITIES.get(p, p)
+
+@app.template_filter('role_label')
+def role_label_filter(r):
+    return ROLE_LABELS.get(r, r)
 
 
 @app.template_filter('datefmt')
@@ -256,7 +266,8 @@ def init_db():
     # Lightweight compatibility migration for older databases.
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.users
-            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL
+            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL,
+            ADD COLUMN IF NOT EXISTS avatar varchar(32) NULL DEFAULT 'cat'
     """))
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.service_catalog
@@ -266,11 +277,6 @@ def init_db():
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.tickets
             ADD COLUMN IF NOT EXISTS deadline_at timestamptz NULL
-    """))
-    db.session.execute(text("""
-        ALTER TABLE IF EXISTS sm.users
-            ALTER COLUMN mobile TYPE varchar(20),
-            ALTER COLUMN work_phone TYPE varchar(20)
     """))
     db.session.commit()
 
@@ -398,8 +404,6 @@ def login():
                 pwd.failed_attempts = 0
                 user.last_loggon_date = datetime.utcnow()
                 db.session.commit()
-                audit(user.user_uid, 'login', ip=request.remote_addr)
-                db.session.commit()
                 login_user(user)
                 if pwd.is_first_login or pwd.must_change_password:
                     return redirect('/change-password')
@@ -433,8 +437,6 @@ def change_password():
 @app.route('/logout')
 @login_required
 def logout():
-    audit(current_user.user_uid, 'logout', ip=request.remote_addr)
-    db.session.commit()
     logout_user()
     return redirect('/login')
 
@@ -583,7 +585,6 @@ def approvals():
 @login_required
 def get_catalog_item(catalog_uid):
     cat = ServiceCatalog.query.get_or_404(catalog_uid)
-    templates = TicketTemplate.query.filter_by(catalog_uid=catalog_uid, is_public=True).all()
     return jsonify({
         'catalog_uid': cat.catalog_uid,
         'catalog_name': cat.catalog_name,
@@ -591,9 +592,6 @@ def get_catalog_item(catalog_uid):
         'ticket_type': cat.ticket_type,
         'priority': cat.priority,
         'approval_required': cat.approval_required,
-        'templates': [{'uid': t.template_uid, 'name': t.template_name,
-                        'summary': t.summary, 'description': t.description}
-                      for t in templates],
     })
 
 
@@ -844,14 +842,6 @@ def create_ticket():
             notify(first.approver_uid,
                    f'Требуется согласование заявки {ticket.ticket_number}',
                    ticket_uid=ticket.ticket_uid)
-
-    tpl_name = (data.get('save_as_template') or '').strip()
-    if tpl_name:
-        db.session.add(TicketTemplate(
-            template_name=tpl_name, catalog_uid=catalog_uid,
-            summary=summary, description=description,
-            priority=ticket.priority, created_by=current_user.user_uid, is_public=False,
-        ))
 
     db.session.commit()
     return jsonify({'success': True, 'ticket_number': ticket.ticket_number,
@@ -1156,27 +1146,6 @@ def serve_upload(filename):
 
 
 # ============================================================
-# TEMPLATES API
-# ============================================================
-
-@app.route('/api/templates')
-@login_required
-def list_templates():
-    catalog_uid = request.args.get('catalog_uid')
-    q = TicketTemplate.query.filter(
-        db.or_(TicketTemplate.is_public == True,
-               TicketTemplate.created_by == current_user.user_uid)
-    )
-    if catalog_uid:
-        q = q.filter_by(catalog_uid=catalog_uid)
-    return jsonify([{
-        'uid': t.template_uid, 'name': t.template_name,
-        'catalog_uid': t.catalog_uid, 'summary': t.summary,
-        'description': t.description, 'priority': t.priority,
-    } for t in q.order_by(TicketTemplate.template_name).all()])
-
-
-# ============================================================
 # SPECIALISTS API
 # ============================================================
 
@@ -1332,8 +1301,6 @@ def create_user():
                 role=role, work_group_uid=wg_uid, manager_uid=manager_uid,
                 creator_uid=current_user.user_uid,
             )
-            audit(current_user.user_uid, 'create_user', 'user', None,
-                  f'Создан пользователь {user_name}', request.remote_addr)
             db.session.commit()
             return render_template('create_user.html', work_groups=work_groups,
                                    all_users=all_users, success=True,
@@ -1591,26 +1558,13 @@ def delete_work_group(wg_uid):
     if current_user.role != 'admin':
         return jsonify({'error': 'Доступ запрещён'}), 403
     wg = WorkGroup.query.get_or_404(wg_uid)
-    wg.isactive = False
+    has_catalog = ServiceCatalog.query.filter_by(work_group_uid=wg_uid).first()
+    if has_catalog:
+        return jsonify({'error': 'Нельзя удалить группу: есть связанные услуги'}), 400
+    UserWorkGroup.query.filter_by(work_group_uid=wg_uid).delete()
+    db.session.delete(wg)
     db.session.commit()
     return jsonify({'success': True})
-
-
-# ============================================================
-# ADMIN — AUDIT LOG
-# ============================================================
-
-@app.route('/admin/audit-log')
-@login_required
-def admin_audit_log():
-    if current_user.role != 'admin':
-        return 'Доступ запрещён', 403
-    page = request.args.get('page', 1, type=int)
-    logs = AuditLog.query.order_by(AuditLog.create_date.desc()).paginate(
-        page=page, per_page=50, error_out=False)
-    uids = {log.user_uid for log in logs.items if log.user_uid}
-    users_by_uid = {u.user_uid: u for u in User.query.filter(User.user_uid.in_(uids)).all()}
-    return render_template('admin_audit_log.html', logs=logs, users_by_uid=users_by_uid)
 
 
 # ============================================================

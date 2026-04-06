@@ -60,7 +60,7 @@
           <td class="td-mono">{{ u.user_name }}</td>
           <td>{{ u.email or '—' }}</td>
           <td>{{ u.title or '—' }}</td>
-          <td><span class="role-badge role-{{ u.role }}">{{ u.role }}</span></td>
+          <td><span class="role-badge role-{{ u.role }}">{{ u.role|role_label }}</span></td>
           <td>{{ wgs[0].group_name if wgs else '—' }}</td>
           <td>
             {% if mgr %}

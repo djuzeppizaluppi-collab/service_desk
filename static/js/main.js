@@ -373,8 +373,8 @@ function renderComments(comments) {
   el.innerHTML = comments.map(c => `
     <div class="comment ${c.is_internal ? 'comment-internal' : ''}">
       <div class="comment-header">
-        <a href="/user/${esc(c.author_uid)}" class="comment-author">
-          ${esc(c.author)}
+        <a href="/user/${c.author_uid}" class="comment-author">
+          ${c.author}
         </a>
         ${c.is_internal ? '<span class="comment-internal-badge">Внутренний</span>' : ''}
         <span class="comment-date">${esc(c.created_at)}</span>

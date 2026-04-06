@@ -69,6 +69,18 @@ a:hover { color: var(--accent-hover); }
 button { cursor: pointer; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
 
+/* Avatars removed by request */
+.nav-avatar,
+.td-avatar,
+.card-avatar,
+.profile-avatar-section,
+.user-profile-avatar,
+.avatar-picker,
+.avatar-grid,
+.avatar-option {
+  display: none !important;
+}
+
 /* =========================================================
    NAVBAR
    ========================================================= */

@@ -8,7 +8,7 @@
     <!-- LEFT: profile card -->
     <div class="profile-card">
       <div class="profile-name">{{ current_user.full_name() }}</div>
-      <div class="profile-role">{{ current_user.role }}</div>
+      <div class="profile-role">{{ current_user.role|role_label }}</div>
 
       <!-- Info grid (read-only, Bug #6 fix) -->
       <div class="profile-info-grid">

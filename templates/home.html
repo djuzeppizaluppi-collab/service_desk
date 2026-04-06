@@ -158,12 +158,8 @@
       <button class="modal-close" id="newTicketClose"><i data-feather="x"></i></button>
     </div>
     <div class="modal-body">
-      <div id="tplPickerWrap" style="display:none" class="form-group">
-        <label class="form-label">Шаблон</label>
-        <select id="tplSelect" class="form-select" onchange="applyTemplate(this.value)">
-          <option value="">— Без шаблона —</option>
-        </select>
-      </div>
+
+      <!-- Approval notice -->
       <div id="approvalNotice" style="display:none" class="alert alert-info">
         <i data-feather="check-square"></i>
         Эта услуга требует согласования. Заявка будет отправлена на согласование руководителю.
@@ -178,12 +174,7 @@
         <textarea class="form-textarea" id="newTicketDesc" rows="5"
                   placeholder="Подробно опишите ситуацию..."></textarea>
       </div>
-      <details class="collapsible">
-        <summary>Сохранить как шаблон</summary>
-        <div class="form-group mt-1">
-          <input class="form-input" type="text" id="tplSaveName" placeholder="Название шаблона">
-        </div>
-      </details>
+
       <input type="hidden" id="newTicketCatalogUid">
       <div class="modal-footer">
         <button class="btn btn-ghost" id="newTicketCancel">Отмена</button>
@@ -351,16 +342,13 @@ function renderSuggestions(d, q) {
 // NEW TICKET MODAL
 // =========================================================
 let _catalogCache = {};
-let _templateCache = {};
 
 async function openNewTicketFromCatalog(catalogUid, catalogName) {
   document.getElementById('newTicketCatalogUid').value = catalogUid;
   document.getElementById('newTicketTitle').textContent = catalogName;
   document.getElementById('newTicketSummary').value = '';
   document.getElementById('newTicketDesc').value = '';
-  document.getElementById('tplSaveName').value = '';
   document.getElementById('approvalNotice').style.display = 'none';
-  document.getElementById('tplPickerWrap').style.display = 'none';
 
   try {
     const r = await fetch(`/api/catalog/${catalogUid}`);
@@ -369,29 +357,11 @@ async function openNewTicketFromCatalog(catalogUid, catalogName) {
     document.getElementById('newTicketSubtitle').textContent = d.catalog_description || '';
     if (d.approval_required)
       document.getElementById('approvalNotice').style.display = 'flex';
-    if (d.templates && d.templates.length) {
-      const sel = document.getElementById('tplSelect');
-      sel.innerHTML = '<option value="">— Без шаблона —</option>';
-      _templateCache = {};
-      d.templates.forEach(t => {
-        _templateCache[t.uid] = t;
-        sel.innerHTML += `<option value="${esc(t.uid)}">${esc(t.name)}</option>`;
-      });
-      document.getElementById('tplPickerWrap').style.display = '';
-    }
   } catch(e) {}
 
   document.getElementById('newTicketOverlay').style.display = 'flex';
   feather.replace();
   document.getElementById('newTicketSummary').focus();
-}
-
-function applyTemplate(uid) {
-  if (!uid) return;
-  const t = _templateCache[uid];
-  if (!t) return;
-  if (t.summary)     document.getElementById('newTicketSummary').value = t.summary;
-  if (t.description) document.getElementById('newTicketDesc').value = t.description;
 }
 
 function closeNewTicket() {
@@ -408,14 +378,19 @@ document.getElementById('newTicketSubmit').onclick = async function() {
   const summary = document.getElementById('newTicketSummary').value.trim();
   const desc    = document.getElementById('newTicketDesc').value.trim();
   const uid     = document.getElementById('newTicketCatalogUid').value;
-  const tpl     = document.getElementById('tplSaveName').value.trim();
-  if (!summary || !desc) { showToast('Заполните тему и описание', 'error'); return; }
-  this.disabled = true; this.textContent = 'Отправка...';
+
+  if (!summary || !desc) {
+    showToast('Заполните тему и описание', 'error');
+    return;
+  }
+  this.disabled = true;
+  this.textContent = 'Отправка...';
+
   try {
     const r = await fetch('/api/tickets', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({summary, description: desc, catalog_uid: uid, save_as_template: tpl})
+      body: JSON.stringify({summary, description: desc, catalog_uid: uid})
     });
     const d = await r.json();
     if (d.success) {

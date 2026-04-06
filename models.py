@@ -4,6 +4,11 @@ from flask_login import UserMixin
 from datetime import datetime
 
 db = SQLAlchemy()
+AVATAR_EMOJIS = {
+    'cat': '🐱', 'dog': '🐶', 'fox': '🦊', 'bear': '🐻', 'penguin': '🐧',
+    'owl': '🦉', 'tiger': '🐯', 'rabbit': '🐰', 'wolf': '🐺', 'panda': '🐼',
+    'frog': '🐸', 'lion': '🦁', 'koala': '🐨', 'duck': '🦆', 'dragon': '🐲',
+}
 
 
 def gen_uuid():
@@ -30,6 +35,7 @@ class User(UserMixin, db.Model):
     department = db.Column(db.String(255), nullable=True)
     company = db.Column(db.String(255), nullable=True)
     manager_uid = db.Column(db.String(36), db.ForeignKey('sm.users.user_uid'), nullable=True)
+    avatar = db.Column(db.String(32), nullable=False, default='cat')
     work_status = db.Column(db.String(20), nullable=True)
     is_vip = db.Column(db.Boolean, default=False)
     is_deactivated = db.Column(db.Boolean, default=False)
@@ -85,6 +91,10 @@ class User(UserMixin, db.Model):
 
     def all_work_groups(self):
         return [l.work_group for l in self.work_group_links.order_by(UserWorkGroup.assigned_date).all()]
+
+    def avatar_emoji(self):
+        return ''
+
 
     def avatar_emoji(self):
         return ''
