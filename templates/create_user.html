@@ -34,23 +34,6 @@
     <div class="card-body">
       <form method="POST">
 
-        <!-- Avatar picker -->
-        <div class="form-section-title">Аватар</div>
-        <div class="avatar-grid mb-2">
-          {% set emoji_map = {
-            'cat':'🐱','dog':'🐶','fox':'🦊','bear':'🐻','penguin':'🐧',
-            'owl':'🦉','tiger':'🐯','rabbit':'🐰','wolf':'🐺','panda':'🐼',
-            'frog':'🐸','lion':'🦁','koala':'🐨','duck':'🐥','dragon':'🐲'
-          } %}
-          {% for av in AVATAR_LIST %}
-          <button type="button" class="avatar-option {% if loop.first %}selected{% endif %}"
-                  data-av="{{ av }}" onclick="selectAvatar('{{ av }}')">
-            {{ emoji_map[av] }}
-          </button>
-          {% endfor %}
-        </div>
-        <input type="hidden" name="avatar" id="avatarInput" value="cat">
-
         <div class="form-section-title">Личные данные</div>
         <div class="form-grid">
           <div class="form-group">
@@ -149,11 +132,4 @@
   </div>
   {% endif %}
 </div>
-<script>
-function selectAvatar(av) {
-  document.querySelectorAll('.avatar-option').forEach(b => b.classList.remove('selected'));
-  document.querySelector(`.avatar-option[data-av="${av}"]`).classList.add('selected');
-  document.getElementById('avatarInput').value = av;
-}
-</script>
 {% endblock %}

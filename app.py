@@ -15,7 +15,7 @@ from flask_login import (LoginManager, login_user, login_required,
 from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
                     SlaPolicy, ServiceCatalog, ApprovalRoute, ApprovalStep,
                     TicketApproval, Ticket, TicketHistory, TicketParamValue,
-                    Attachment, Notification, TicketTemplate, AuditLog, gen_uuid)
+                    Attachment, Notification, gen_uuid)
 from db_functions import (
     create_user_db, reset_password_db, verify_password,
     _set_password_hash, _ensure_role, _ensure_work_group,
@@ -77,11 +77,12 @@ BOARD_COLUMNS = {
     'done':        ('Завершено',       ['resolved', 'closed', 'cancelled']),
 }
 PRIORITIES = {'low': 'Низкий', 'medium': 'Средний', 'high': 'Высокий', 'critical': 'Критический'}
-AVATAR_LIST = ['cat', 'dog', 'fox', 'bear', 'penguin', 'owl',
-               'tiger', 'rabbit', 'wolf', 'panda', 'frog', 'lion',
-               'koala', 'duck', 'dragon']
-
-
+ROLE_LABELS = {
+    'user': 'Пользователь',
+    'specialist': 'Task Executor',
+    'manager': 'Manager (Supervisor)',
+    'admin': 'Администратор',
+}
 # ============================================================
 # HELPERS
 # ============================================================
@@ -153,11 +154,15 @@ def status_label_filter(s):
 def priority_label_filter(p):
     return PRIORITIES.get(p, p)
 
+@app.template_filter('role_label')
+def role_label_filter(r):
+    return ROLE_LABELS.get(r, r)
+
 
 @app.template_filter('datefmt')
 def datefmt_filter(dt, fmt='%d.%m.%Y %H:%M'):
     if not dt:
-        return 'E2014'
+        return '—'
     return dt.strftime(fmt)
 
 
@@ -168,7 +173,6 @@ def inject_globals():
         'is_specialist': is_specialist,
         'now': datetime.utcnow(),
         'PRIORITIES': PRIORITIES,
-        'AVATAR_LIST': AVATAR_LIST,
         'User': User,
     }
 
@@ -180,9 +184,101 @@ def inject_globals():
 def init_db():
     """Initialize schema and default data."""
     from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
     db.session.execute(text('CREATE SCHEMA IF NOT EXISTS sm'))
     db.session.commit()
-    db.create_all()
+    try:
+        db.create_all()
+    except SQLAlchemyError:
+        # Existing installations can have UUID columns in base tables while
+        # ORM models use String(36). In that case create_all() may fail when
+        # creating new FK tables. Continue with explicit SQL below.
+        db.session.rollback()
+
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.approval_routes (
+            route_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            route_name varchar(200) NOT NULL,
+            catalog_uid uuid NOT NULL REFERENCES sm.service_catalog(catalog_uid) ON DELETE CASCADE,
+            is_active bool DEFAULT true NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
+            create_by uuid NOT NULL REFERENCES sm.users(user_uid)
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.approval_steps (
+            step_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            route_uid uuid NOT NULL REFERENCES sm.approval_routes(route_uid) ON DELETE CASCADE,
+            step_order int4 NOT NULL DEFAULT 1,
+            step_name varchar(200) NULL,
+            approver_uid uuid NULL REFERENCES sm.users(user_uid),
+            approver_role varchar(32) NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.ticket_approvals (
+            approval_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            ticket_uid uuid NOT NULL REFERENCES sm.tickets(ticket_uid) ON DELETE CASCADE,
+            step_order int4 NOT NULL DEFAULT 1,
+            step_name varchar(200) NULL,
+            approver_uid uuid NULL REFERENCES sm.users(user_uid),
+            status varchar(20) NOT NULL DEFAULT 'pending',
+            comment text NULL,
+            decided_at timestamptz NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.notifications (
+            notification_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_uid uuid NOT NULL REFERENCES sm.users(user_uid) ON DELETE CASCADE,
+            message text NOT NULL,
+            ticket_uid uuid NULL REFERENCES sm.tickets(ticket_uid) ON DELETE SET NULL,
+            is_read bool DEFAULT false NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.ticket_templates (
+            template_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            template_name varchar(200) NOT NULL,
+            catalog_uid uuid NOT NULL REFERENCES sm.service_catalog(catalog_uid) ON DELETE CASCADE,
+            summary varchar(500) NOT NULL,
+            description text NOT NULL,
+            priority varchar(20) NULL,
+            created_by uuid NOT NULL REFERENCES sm.users(user_uid),
+            is_public bool DEFAULT false NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    db.session.execute(text("""
+        CREATE TABLE IF NOT EXISTS sm.audit_log (
+            audit_uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_uid uuid NULL REFERENCES sm.users(user_uid) ON DELETE SET NULL,
+            action varchar(64) NOT NULL,
+            entity_type varchar(64) NULL,
+            entity_uid uuid NULL,
+            details text NULL,
+            ip_address varchar(64) NULL,
+            create_date timestamptz DEFAULT CURRENT_TIMESTAMP NULL
+        )
+    """))
+    # Lightweight compatibility migration for older databases.
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.users
+            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL,
+            ADD COLUMN IF NOT EXISTS avatar varchar(32) NULL DEFAULT 'cat'
+    """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.service_catalog
+            ADD COLUMN IF NOT EXISTS is_active bool DEFAULT true,
+            ADD COLUMN IF NOT EXISTS approval_required bool DEFAULT false
+    """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.tickets
+            ADD COLUMN IF NOT EXISTS deadline_at timestamptz NULL
+    """))
+    db.session.commit()
 
     SYS = '00000000-0000-0000-0000-000000000001'
 
@@ -190,7 +286,7 @@ def init_db():
         uid = gen_uuid()
         db.session.add(User(user_uid=uid, user_name='admin',
                             first_name='Администратор', last_name='Системный',
-                            email='admin@company.ru', avatar='dragon', create_by=SYS))
+                            email='admin@company.ru', create_by=SYS))
         db.session.flush()
         db.session.add(Password(user_uid=uid,
                                 passwordhash=generate_password_hash('Admin123!'),
@@ -250,6 +346,11 @@ def init_db():
         cat = ServiceCatalog.query.filter_by(catalog_path=path).first()
         if not cat:
             parent_uid = cat_map.get(parent_key)
+            if prio == 'high':
+                picked_sla_uid = sla_hi.sla_uid if sla_hi else (sla_std.sla_uid if sla_std else None)
+            else:
+                picked_sla_uid = sla_std.sla_uid if sla_std else (sla_hi.sla_uid if sla_hi else None)
+
             cat = ServiceCatalog(
                 catalog_name=name, catalog_path=path,
                 catalog_type='service' if parent_key else 'category',
@@ -257,7 +358,7 @@ def init_db():
                 work_group_uid=wg_map.get(wg_key),
                 ticket_type=ttype or 'service_request',
                 priority=prio or 'medium',
-                sla_uid=(sla_hi.sla_uid if prio == 'high' else sla_std.sla_uid) if sla_std else None,
+                sla_uid=picked_sla_uid,
                 catalog_icon=icon, catalog_description=desc,
                 approval_required=appr, create_by=SYS,
             )
@@ -301,8 +402,6 @@ def login():
                 pwd.failed_attempts = 0
                 user.last_loggon_date = datetime.utcnow()
                 db.session.commit()
-                audit(user.user_uid, 'login', ip=request.remote_addr)
-                db.session.commit()
                 login_user(user)
                 if pwd.is_first_login or pwd.must_change_password:
                     return redirect('/change-password')
@@ -336,8 +435,6 @@ def change_password():
 @app.route('/logout')
 @login_required
 def logout():
-    audit(current_user.user_uid, 'logout', ip=request.remote_addr)
-    db.session.commit()
     logout_user()
     return redirect('/login')
 
@@ -393,7 +490,6 @@ def home():
 @login_required
 def get_catalog_item(catalog_uid):
     cat = ServiceCatalog.query.get_or_404(catalog_uid)
-    templates = TicketTemplate.query.filter_by(catalog_uid=catalog_uid, is_public=True).all()
     return jsonify({
         'catalog_uid': cat.catalog_uid,
         'catalog_name': cat.catalog_name,
@@ -401,9 +497,6 @@ def get_catalog_item(catalog_uid):
         'ticket_type': cat.ticket_type,
         'priority': cat.priority,
         'approval_required': cat.approval_required,
-        'templates': [{'uid': t.template_uid, 'name': t.template_name,
-                        'summary': t.summary, 'description': t.description}
-                      for t in templates],
     })
 
 
@@ -420,21 +513,6 @@ def profile():
     ).order_by(Ticket.created_at.desc()).limit(20).all()
     manager = User.query.get(current_user.manager_uid) if current_user.manager_uid else None
     return render_template('profile.html', tickets=tickets, manager=manager)
-
-
-@app.route('/profile/avatar', methods=['POST'])
-@login_required
-def profile_avatar():
-    avatar = request.form.get('avatar', 'cat')
-    if avatar not in AVATAR_LIST:
-        flash('Неверный аватар', 'error')
-        return redirect('/profile')
-    current_user.avatar = avatar
-    current_user.update_date = datetime.utcnow()
-    current_user.update_by = current_user.user_uid
-    db.session.commit()
-    flash('Аватар обновлён', 'success')
-    return redirect('/profile')
 
 
 @app.route('/profile/password', methods=['POST'])
@@ -668,14 +746,6 @@ def create_ticket():
                    f'Требуется согласование заявки {ticket.ticket_number}',
                    ticket_uid=ticket.ticket_uid)
 
-    tpl_name = (data.get('save_as_template') or '').strip()
-    if tpl_name:
-        db.session.add(TicketTemplate(
-            template_name=tpl_name, catalog_uid=catalog_uid,
-            summary=summary, description=description,
-            priority=ticket.priority, created_by=current_user.user_uid, is_public=False,
-        ))
-
     db.session.commit()
     return jsonify({'success': True, 'ticket_number': ticket.ticket_number,
                     'ticket_uid': ticket.ticket_uid})
@@ -702,7 +772,6 @@ def get_ticket(ticket_uid):
             'uid': pv.param_value_uid,
             'author': pv.author_rel.full_name() if pv.author_rel else '—',
             'author_uid': pv.author_uid,
-            'author_avatar': pv.author_rel.avatar_emoji() if pv.author_rel else '🙂',
             'text': pv.param_value,
             'is_internal': pv.param_type == 'internal_comment',
             'created_at': pv.create_date.strftime('%d.%m.%Y %H:%M'),
@@ -754,7 +823,6 @@ def get_ticket(ticket_uid):
         'requester_uid':    ticket.requester_uid,
         'performer':        ticket.performer.full_name() if ticket.performer else None,
         'performer_uid':    ticket.performer_uid,
-        'performer_avatar': ticket.performer.avatar_emoji() if ticket.performer else None,
         'deadline':         ticket.deadline_at.strftime('%d.%m.%Y %H:%M') if ticket.deadline_at else None,
         'is_overdue':       ticket.is_overdue(),
         'created_at':       ticket.created_at.strftime('%d.%m.%Y %H:%M'),
@@ -918,7 +986,6 @@ def add_comment(ticket_uid):
         'comment': {
             'author': current_user.full_name(),
             'author_uid': current_user.user_uid,
-            'author_avatar': current_user.avatar_emoji(),
             'text': text,
             'is_internal': is_internal,
             'created_at': datetime.utcnow().strftime('%d.%m.%Y %H:%M'),
@@ -966,27 +1033,6 @@ def serve_upload(filename):
 
 
 # ============================================================
-# TEMPLATES API
-# ============================================================
-
-@app.route('/api/templates')
-@login_required
-def list_templates():
-    catalog_uid = request.args.get('catalog_uid')
-    q = TicketTemplate.query.filter(
-        db.or_(TicketTemplate.is_public == True,
-               TicketTemplate.created_by == current_user.user_uid)
-    )
-    if catalog_uid:
-        q = q.filter_by(catalog_uid=catalog_uid)
-    return jsonify([{
-        'uid': t.template_uid, 'name': t.template_name,
-        'catalog_uid': t.catalog_uid, 'summary': t.summary,
-        'description': t.description, 'priority': t.priority,
-    } for t in q.order_by(TicketTemplate.template_name).all()])
-
-
-# ============================================================
 # SPECIALISTS API
 # ============================================================
 
@@ -1009,7 +1055,7 @@ def get_specialists():
         ).order_by(User.last_name).all()
     return jsonify([{
         'user_uid': u.user_uid, 'full_name': u.full_name(),
-        'avatar': u.avatar_emoji(), 'role': u.role,
+        'role': u.role,
     } for u in users])
 
 
@@ -1120,7 +1166,6 @@ def create_user():
         role        = request.form.get('role', 'user')
         wg_uid      = request.form.get('work_group_uid') or None
         manager_uid = request.form.get('manager_uid') or None
-        avatar      = request.form.get('avatar', 'cat')
 
         if User.query.filter_by(email=email).first():
             return render_template('create_user.html', work_groups=work_groups,
@@ -1131,10 +1176,8 @@ def create_user():
                 last_name, first_name, middle_name, email, mobile,
                 work_phone, gender, title, department, company,
                 role=role, work_group_uid=wg_uid, manager_uid=manager_uid,
-                creator_uid=current_user.user_uid, avatar=avatar,
+                creator_uid=current_user.user_uid,
             )
-            audit(current_user.user_uid, 'create_user', 'user', None,
-                  f'Создан пользователь {user_name}', request.remote_addr)
             db.session.commit()
             return render_template('create_user.html', work_groups=work_groups,
                                    all_users=all_users, success=True,
@@ -1171,7 +1214,6 @@ def edit_user(user_uid):
         user.department     = request.form.get('department', '').strip() or user.department
         user.company        = request.form.get('company', '').strip() or user.company
         user.manager_uid    = request.form.get('manager_uid') or None
-        user.avatar         = request.form.get('avatar', user.avatar)
         user.is_deactivated = 'is_deactivated' in request.form
         user.update_date    = datetime.utcnow()
         user.update_by      = current_user.user_uid
@@ -1350,24 +1392,13 @@ def delete_work_group(wg_uid):
     if current_user.role != 'admin':
         return jsonify({'error': 'Доступ запрещён'}), 403
     wg = WorkGroup.query.get_or_404(wg_uid)
-    wg.isactive = False
+    has_catalog = ServiceCatalog.query.filter_by(work_group_uid=wg_uid).first()
+    if has_catalog:
+        return jsonify({'error': 'Нельзя удалить группу: есть связанные услуги'}), 400
+    UserWorkGroup.query.filter_by(work_group_uid=wg_uid).delete()
+    db.session.delete(wg)
     db.session.commit()
     return jsonify({'success': True})
-
-
-# ============================================================
-# ADMIN — AUDIT LOG
-# ============================================================
-
-@app.route('/admin/audit-log')
-@login_required
-def admin_audit_log():
-    if current_user.role != 'admin':
-        return 'Доступ запрещён', 403
-    page = request.args.get('page', 1, type=int)
-    logs = AuditLog.query.order_by(AuditLog.create_date.desc()).paginate(
-        page=page, per_page=50, error_out=False)
-    return render_template('admin_audit_log.html', logs=logs)
 
 
 # ============================================================

@@ -258,7 +258,7 @@ function renderTicketModal(t) {
   // Performer
   const perfEl = document.getElementById('sidebarPerformer');
   if (t.performer) {
-    perfEl.innerHTML = `<a href="/user/${t.performer_uid}">${t.performer_avatar || ''} ${t.performer}</a>`;
+    perfEl.innerHTML = `<a href="/user/${t.performer_uid}">${t.performer}</a>`;
   } else {
     perfEl.textContent = 'Не назначен';
   }
@@ -284,7 +284,7 @@ function renderTicketModal(t) {
       _specialists.forEach(sp => {
         const opt = document.createElement('option');
         opt.value = sp.user_uid;
-        opt.textContent = `${sp.avatar} ${sp.full_name}`;
+        opt.textContent = sp.full_name;
         if (sp.user_uid === t.performer_uid) opt.selected = true;
         sel.appendChild(opt);
       });
@@ -363,7 +363,7 @@ function renderComments(comments) {
     <div class="comment ${c.is_internal ? 'comment-internal' : ''}">
       <div class="comment-header">
         <a href="/user/${c.author_uid}" class="comment-author">
-          ${c.author_avatar || ''} ${c.author}
+          ${c.author}
         </a>
         ${c.is_internal ? '<span class="comment-internal-badge">Внутренний</span>' : ''}
         <span class="comment-date">${c.created_at}</span>
