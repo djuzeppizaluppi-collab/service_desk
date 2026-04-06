@@ -4,23 +4,26 @@
 
 <div class="page-home">
 
-  <!-- Search bar -->
+  <!-- Search bar with live suggestions -->
   <div class="home-search-bar">
-    <form method="GET" action="/" class="search-form">
-      <div class="search-input-wrap">
-        <i data-feather="search" class="search-icon"></i>
-        <input class="search-input" type="text" name="q" value="{{ q }}"
-               placeholder="Поиск по номеру, теме или категории...">
-        <input type="hidden" name="view" value="{{ view }}">
-        {% if q %}
-        <a href="/?view={{ view }}" class="search-clear"><i data-feather="x"></i></a>
-        {% endif %}
+    <div class="search-form">
+      <div class="search-suggestions-wrap">
+        <div class="search-input-wrap">
+          <i data-feather="search" class="search-icon"></i>
+          <input class="search-input" type="text" id="searchInput"
+                 name="q" value="{{ q }}"
+                 placeholder="Поиск по заявкам, категориям, услугам..."
+                 autocomplete="off">
+          <a href="/?view={{ view }}" class="search-clear" id="searchClear"
+             style="{{ '' if q else 'display:none' }}"><i data-feather="x"></i></a>
+        </div>
+        <div class="search-suggestions" id="searchSuggestions" style="display:none"></div>
       </div>
-      <button class="btn btn-primary" type="submit">Найти</button>
-    </form>
+      <button class="btn btn-primary" id="searchBtn" type="button">Найти</button>
+    </div>
   </div>
 
-  <!-- View switcher (Bug #15 / Дор. #15) -->
+  <!-- Tabs -->
   <div class="view-switcher">
     <a href="/?view=catalog{% if q %}&q={{ q }}{% endif %}"
        class="view-tab {% if view == 'catalog' %}active{% endif %}">
@@ -32,7 +35,7 @@
     </a>
   </div>
 
-  <!-- Search results overlay -->
+  <!-- Full search results (on page load with ?q=) -->
   {% if q and search_results is not none %}
   <div class="search-results-section">
     <h3 class="section-title">
@@ -60,20 +63,25 @@
   </div>
   {% endif %}
 
-  <!-- CATALOG VIEW -->
+  <!-- CATALOG VIEW — accordion -->
   {% if view == 'catalog' and not (q and search_results is not none) %}
-  <div class="catalog-grid">
+  <div class="catalog-accordion" id="catalogAccordion">
     {% for cat in categories %}
-    <div class="catalog-section">
-      <div class="catalog-section-header">
-        <i data-feather="{{ cat.catalog_icon or 'folder' }}"></i>
-        <h3>{{ cat.catalog_name }}</h3>
-        {% if cat.catalog_description %}
-        <p class="catalog-section-desc">{{ cat.catalog_description }}</p>
-        {% endif %}
-      </div>
-      <div class="catalog-services">
-        {% if cat._children %}
+    <div class="cat-item" data-uid="{{ cat.catalog_uid }}" data-name="{{ cat.catalog_name }}">
+      <button class="cat-header" onclick="toggleCat('{{ cat.catalog_uid }}')">
+        <span class="cat-header-icon"><i data-feather="{{ cat.catalog_icon or 'folder' }}"></i></span>
+        <span class="cat-header-text">
+          <span class="cat-header-name">{{ cat.catalog_name }}</span>
+          {% if cat.catalog_description %}
+          <span class="cat-header-desc">{{ cat.catalog_description }}</span>
+          {% endif %}
+        </span>
+        <span class="cat-header-count">{{ cat._children|length }}</span>
+        <i data-feather="chevron-down" class="cat-chevron"></i>
+      </button>
+      <div class="cat-body" id="cat-body-{{ cat.catalog_uid }}">
+        <div class="cat-services">
+          {% if cat._children %}
           {% for svc in cat._children %}
           <button class="catalog-service-card"
                   onclick="openNewTicketFromCatalog('{{ svc.catalog_uid }}', '{{ svc.catalog_name|replace("'","\\'")|e }}')">
@@ -92,11 +100,14 @@
             </div>
           </button>
           {% endfor %}
-        {% else %}
+          {% else %}
           <div class="catalog-empty">Услуги не настроены</div>
-        {% endif %}
+          {% endif %}
+        </div>
       </div>
     </div>
+    {% else %}
+    <div class="empty-state"><i data-feather="inbox"></i><p>Каталог пуст</p></div>
     {% endfor %}
   </div>
   {% endif %}
@@ -118,12 +129,8 @@
           {% if t.deadline_at %}
             {% if t.is_overdue() %}
             <span class="overdue-label"><i data-feather="alert-circle"></i> {{ t.deadline_at|datefmt }}</span>
-            {% else %}
-            {{ t.deadline_at|datefmt }}
-            {% endif %}
-          {% else %}
-          {{ t.created_at|datefmt }}
-          {% endif %}
+            {% else %}{{ t.deadline_at|datefmt }}{% endif %}
+          {% else %}{{ t.created_at|datefmt }}{% endif %}
         </span>
       </div>
       {% endfor %}
@@ -157,7 +164,6 @@
         <i data-feather="check-square"></i>
         Эта услуга требует согласования. Заявка будет отправлена на согласование руководителю.
       </div>
-
       <div class="form-group">
         <label class="form-label">Тема <span class="required">*</span></label>
         <input class="form-input" type="text" id="newTicketSummary"
@@ -166,11 +172,10 @@
       <div class="form-group">
         <label class="form-label">Описание <span class="required">*</span></label>
         <textarea class="form-textarea" id="newTicketDesc" rows="5"
-                  placeholder="Подробно опишите ситуацию, шаги для воспроизведения, что нужно сделать..."></textarea>
+                  placeholder="Подробно опишите ситуацию..."></textarea>
       </div>
 
       <input type="hidden" id="newTicketCatalogUid">
-
       <div class="modal-footer">
         <button class="btn btn-ghost" id="newTicketCancel">Отмена</button>
         <button class="btn btn-primary" id="newTicketSubmit">
@@ -185,6 +190,157 @@
 
 {% block scripts %}
 <script>
+// =========================================================
+// ACCORDION
+// =========================================================
+function toggleCat(uid) {
+  const item  = document.querySelector(`.cat-item[data-uid="${uid}"]`);
+  const body  = document.getElementById(`cat-body-${uid}`);
+  const isOpen = item.classList.contains('open');
+
+  if (isOpen) {
+    item.classList.remove('open');
+    body.style.maxHeight = body.scrollHeight + 'px';
+    requestAnimationFrame(() => { body.style.maxHeight = '0'; });
+  } else {
+    item.classList.add('open');
+    body.style.maxHeight = body.scrollHeight + 'px';
+    body.addEventListener('transitionend', () => {
+      if (item.classList.contains('open')) body.style.maxHeight = 'none';
+    }, { once: true });
+  }
+  feather.replace();
+}
+
+function openCatByUid(uid) {
+  const item = document.querySelector(`.cat-item[data-uid="${uid}"]`);
+  if (item && !item.classList.contains('open')) toggleCat(uid);
+  if (item) item.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// =========================================================
+// LIVE SEARCH
+// =========================================================
+const STATUS_LABELS = {
+  new:'Новая', assigned:'Назначено', in_progress:'В работе',
+  on_hold:'Приостановлено', pending_approval:'На согласовании',
+  approved:'Согласовано', rejected:'Отклонено',
+  resolved:'Решена', closed:'Закрыта', cancelled:'Отменено',
+};
+
+let _sugTimer = null;
+const searchInput = document.getElementById('searchInput');
+const sugBox      = document.getElementById('searchSuggestions');
+const clearBtn    = document.getElementById('searchClear');
+
+searchInput.addEventListener('input', function() {
+  const q = this.value.trim();
+  clearBtn.style.display = q ? '' : 'none';
+  clearTimeout(_sugTimer);
+  if (q.length < 2) { hideSuggestions(); return; }
+  _sugTimer = setTimeout(() => fetchSuggestions(q), 280);
+});
+
+searchInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { hideSuggestions(); this.blur(); }
+  if (e.key === 'Enter') { hideSuggestions(); runFullSearch(); }
+});
+
+document.getElementById('searchBtn').addEventListener('click', runFullSearch);
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.search-suggestions-wrap')) hideSuggestions();
+});
+
+function hideSuggestions() {
+  sugBox.style.display = 'none';
+  sugBox.innerHTML = '';
+}
+
+function runFullSearch() {
+  const q = searchInput.value.trim();
+  if (!q) return;
+  window.location.href = `/?q=${encodeURIComponent(q)}&view=catalog`;
+}
+
+async function fetchSuggestions(q) {
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    const d = await r.json();
+    renderSuggestions(d, q);
+  } catch(e) {}
+}
+
+function renderSuggestions(d, q) {
+  const total = d.tickets.length + d.catalog.length;
+  if (total === 0) {
+    sugBox.innerHTML = `<div class="sug-empty">Ничего не найдено по «${esc(q)}»</div>`;
+    sugBox.style.display = '';
+    return;
+  }
+
+  let html = '';
+
+  if (d.catalog.length) {
+    html += `<div class="sug-section-title"><i data-feather="grid"></i> Каталог услуг</div>`;
+    d.catalog.forEach(c => {
+      const sub  = c.parent ? `<span class="sug-meta">${esc(c.parent)} →</span> ` : '';
+      const icon = c.is_service ? 'file' : 'folder';
+      if (c.is_service) {
+        html += `<div class="sug-item" data-uid="${esc(c.uid)}" data-type="service">
+          <i data-feather="${icon}" class="sug-icon"></i>
+          <span class="sug-text">${sub}${esc(c.name)}</span>
+          <span class="sug-badge">Услуга</span>
+        </div>`;
+      } else {
+        html += `<div class="sug-item" data-uid="${esc(c.uid)}" data-type="category">
+          <i data-feather="${icon}" class="sug-icon"></i>
+          <span class="sug-text">${esc(c.name)}</span>
+          <span class="sug-badge">Раздел</span>
+        </div>`;
+      }
+    });
+  }
+
+  if (d.tickets.length) {
+    html += `<div class="sug-section-title"><i data-feather="file-text"></i> Заявки</div>`;
+    d.tickets.forEach(t => {
+      const label = STATUS_LABELS[t.status] || t.status;
+      html += `<div class="sug-item" data-uid="${esc(t.uid)}" data-type="ticket">
+        <span class="sug-num">${esc(t.number)}</span>
+        <span class="sug-text">${esc(t.summary)}</span>
+        <span class="status-badge status-${esc(t.status)}">${esc(label)}</span>
+      </div>`;
+    });
+  }
+
+  sugBox.innerHTML = html;
+  sugBox.style.display = '';
+
+  // Bind clicks
+  sugBox.querySelectorAll('.sug-item').forEach(el => {
+    el.addEventListener('click', function() {
+      const uid  = this.dataset.uid;
+      const type = this.dataset.type;
+      hideSuggestions();
+      if (type === 'ticket') {
+        openTicket(uid);
+      } else if (type === 'service') {
+        const name = this.querySelector('.sug-text').textContent.split('→').pop().trim();
+        openNewTicketFromCatalog(uid, name);
+      } else {
+        // category: scroll to and open accordion
+        openCatByUid(uid);
+      }
+    });
+  });
+
+  feather.replace();
+}
+
+// =========================================================
+// NEW TICKET MODAL
+// =========================================================
 let _catalogCache = {};
 
 async function openNewTicketFromCatalog(catalogUid, catalogName) {
@@ -194,7 +350,6 @@ async function openNewTicketFromCatalog(catalogUid, catalogName) {
   document.getElementById('newTicketDesc').value = '';
   document.getElementById('approvalNotice').style.display = 'none';
 
-  // Fetch catalog metadata
   try {
     const r = await fetch(`/api/catalog/${catalogUid}`);
     const d = await r.json();
@@ -213,7 +368,7 @@ function closeNewTicket() {
   document.getElementById('newTicketOverlay').style.display = 'none';
 }
 
-document.getElementById('newTicketClose').onclick = closeNewTicket;
+document.getElementById('newTicketClose').onclick  = closeNewTicket;
 document.getElementById('newTicketCancel').onclick = closeNewTicket;
 document.getElementById('newTicketOverlay').onclick = function(e) {
   if (e.target === this) closeNewTicket();
@@ -242,12 +397,8 @@ document.getElementById('newTicketSubmit').onclick = async function() {
       closeNewTicket();
       showToast(`Заявка ${d.ticket_number} создана`, 'success');
       setTimeout(() => location.reload(), 800);
-    } else {
-      showToast(d.error || 'Ошибка', 'error');
-    }
-  } catch(e) {
-    showToast('Ошибка сети', 'error');
-  }
+    } else { showToast(d.error || 'Ошибка', 'error'); }
+  } catch(e) { showToast('Ошибка сети', 'error'); }
   this.disabled = false;
   this.innerHTML = '<i data-feather="send"></i> Отправить заявку';
   feather.replace();
