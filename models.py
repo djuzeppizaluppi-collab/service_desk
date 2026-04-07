@@ -4,16 +4,9 @@ from flask_login import UserMixin
 from datetime import datetime
 
 db = SQLAlchemy()
-AVATAR_EMOJIS = {
-    'cat': '🐱', 'dog': '🐶', 'fox': '🦊', 'bear': '🐻', 'penguin': '🐧',
-    'owl': '🦉', 'tiger': '🐯', 'rabbit': '🐰', 'wolf': '🐺', 'panda': '🐼',
-    'frog': '🐸', 'lion': '🦁', 'koala': '🐨', 'duck': '🦆', 'dragon': '🐲',
-}
-
 
 def gen_uuid():
     return str(uuid.uuid4())
-
 
 # ---------------------------------------------------------------------------
 # sm.users
@@ -91,19 +84,6 @@ class User(UserMixin, db.Model):
 
     def all_work_groups(self):
         return [l.work_group for l in self.work_group_links.order_by(UserWorkGroup.assigned_date).all()]
-
-    def avatar_emoji(self):
-        return ''
-
-
-    def avatar_emoji(self):
-        return ''
-
-
-    def avatar_emoji(self):
-        return ''
-
-
       
 # ---------------------------------------------------------------------------
 # sm.passwords
