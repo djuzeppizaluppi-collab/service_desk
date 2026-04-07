@@ -15,8 +15,7 @@ from flask_login import (LoginManager, login_user, login_required,
 from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
                     SlaPolicy, ServiceCatalog, ApprovalRoute, ApprovalStep,
                     TicketApproval, Ticket, TicketHistory, TicketParamValue,
-                    Attachment, Notification, gen_uuid)
-from db_functions import (
+                    Attachment, Notification, gen_uuid,
     create_user_db, reset_password_db, verify_password,
     _set_password_hash, _ensure_role, _ensure_work_group,
     generate_ticket_number, compute_deadline,
