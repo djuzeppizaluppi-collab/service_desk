@@ -356,8 +356,5 @@ document.getElementById('bulkApply').onclick = async function() {
     else showToast(d.error || 'Ошибка', 'error');
   } catch(e) { showToast('Ошибка сети', 'error'); }
 };
-
-// Fix: bulk endpoint
-const _origFetch = window.fetch;
 </script>
 {% endblock %}

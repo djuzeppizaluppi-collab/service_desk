@@ -4,7 +4,7 @@ Flask + PostgreSQL + SQLAlchemy
 """
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 from flask import (Flask, render_template, request, redirect, jsonify,
@@ -56,7 +56,7 @@ db.init_app(app)
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-login_manager.login_message = 'Пожалуйста, войдите в систему'
+login_manager.login_message = ''
 login_manager.login_message_category = 'info'
 
 
@@ -382,7 +382,9 @@ def login():
     if request.method == 'POST':
         login_val = request.form.get('login', '').strip()
         password  = request.form.get('password', '')
-        user = User.query.filter_by(user_name=login_val).first()
+        user = User.query.filter(
+            db.func.lower(User.user_name) == login_val.lower()
+        ).first()
         if not user or user.is_deactivated or user.is_temp_deactivated:
             error = 'Неверный логин или пароль'
         else:
@@ -479,6 +481,99 @@ def home():
     return render_template('home.html', categories=categories,
                            my_tickets=my_tickets, search_results=search_results,
                            view=view, q=q)
+
+
+# ============================================================
+# LIVE SEARCH API
+# ============================================================
+
+@app.route('/api/search')
+@login_required
+def api_search():
+    q = request.args.get('q', '').strip()
+    if len(q) < 2:
+        return jsonify({'tickets': [], 'catalog': []})
+
+    # Catalog: services + categories matching query
+    cat_q = ServiceCatalog.query.filter(
+        ServiceCatalog.is_active == True,
+        db.or_(
+            ServiceCatalog.catalog_name.ilike(f'%{q}%'),
+            ServiceCatalog.catalog_description.ilike(f'%{q}%'),
+        )
+    ).all()
+    # Sort: starts-with first, then contains; services before categories
+    def _cat_rank(c):
+        starts = c.catalog_name.lower().startswith(q.lower())
+        is_svc = c.catalog_type == 'service'
+        return (0 if starts else 1, 0 if is_svc else 1, c.catalog_name)
+    cat_q = sorted(cat_q, key=_cat_rank)[:8]
+
+    # Tickets matching query (restricted by role)
+    tq = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid, isouter=True)
+    if not is_specialist():
+        tq = tq.filter(db.or_(
+            Ticket.requester_uid == current_user.user_uid,
+            Ticket.recipient_uid == current_user.user_uid,
+        ))
+    tickets = tq.filter(db.or_(
+        Ticket.ticket_number.ilike(f'%{q}%'),
+        Ticket.summary.ilike(f'%{q}%'),
+    )).order_by(Ticket.created_at.desc()).limit(7).all()
+
+    return jsonify({
+        'tickets': [{
+            'uid': t.ticket_uid,
+            'number': t.ticket_number,
+            'summary': t.summary,
+            'status': t.status,
+            'catalog': t.catalog.catalog_name if t.catalog else '—',
+        } for t in tickets],
+        'catalog': [{
+            'uid': c.catalog_uid,
+            'name': c.catalog_name,
+            'type': c.catalog_type,
+            'parent': c.parent.catalog_name if c.parent else None,
+            'is_service': c.catalog_type == 'service',
+        } for c in cat_q],
+    })
+
+
+# ============================================================
+# APPROVALS PAGE
+# ============================================================
+
+@app.route('/approvals')
+@login_required
+def approvals():
+    # Items this user must approve (pending, assigned to them)
+    to_approve = TicketApproval.query.filter_by(
+        approver_uid=current_user.user_uid, status='pending'
+    ).order_by(TicketApproval.create_date.desc()).all()
+
+    # Current user's own tickets awaiting any approval
+    waiting = Ticket.query.filter_by(
+        requester_uid=current_user.user_uid, status='pending_approval'
+    ).order_by(Ticket.created_at.desc()).all()
+
+    # History: approvals decided by current user
+    my_history = TicketApproval.query.filter(
+        TicketApproval.approver_uid == current_user.user_uid,
+        TicketApproval.status.in_(['approved', 'rejected']),
+    ).order_by(TicketApproval.decided_at.desc()).limit(50).all()
+
+    # Admin sees all approval records
+    all_approvals = None
+    if current_user.role == 'admin':
+        all_approvals = TicketApproval.query.order_by(
+            TicketApproval.create_date.desc()
+        ).limit(200).all()
+
+    return render_template('approvals.html',
+                           to_approve=to_approve,
+                           waiting=waiting,
+                           my_history=my_history,
+                           all_approvals=all_approvals)
 
 
 # ============================================================
@@ -640,7 +735,9 @@ def tickets_board():
             pass
     if fd_to:
         try:
-            query = query.filter(Ticket.created_at <= datetime.strptime(fd_to, '%Y-%m-%d'))
+            query = query.filter(
+                Ticket.created_at < datetime.strptime(fd_to, '%Y-%m-%d') + timedelta(days=1)
+            )
         except ValueError:
             pass
 
@@ -846,11 +943,13 @@ def get_ticket(ticket_uid):
 @login_required
 def update_ticket(ticket_uid):
     ticket = Ticket.query.get_or_404(ticket_uid)
-    if not _can_edit_ticket(ticket):
-        return jsonify({'error': 'Доступ запрещён'}), 403
-
     data   = request.get_json() or {}
     action = data.get('action')
+
+    # Approve only needs the user to be a pending approver — checked inside the branch.
+    # All other mutating actions require edit permission.
+    if action != 'approve' and not _can_edit_ticket(ticket):
+        return jsonify({'error': 'Доступ запрещён'}), 403
     now    = datetime.utcnow()
 
     if action == 'take':
@@ -930,26 +1029,40 @@ def update_ticket(ticket_uid):
         db.session.commit()
         return jsonify({'success': True, 'deleted': True})
 
-    elif action == 'bulk_status':
-        if not is_specialist():
-            return jsonify({'error': 'Доступ запрещён'}), 403
-        uids       = data.get('ticket_uids', [])
-        new_status = data.get('status')
-        valid = ['in_progress', 'on_hold', 'resolved', 'closed', 'cancelled']
-        if new_status not in valid:
-            return jsonify({'error': 'Недопустимый статус'}), 400
-        Ticket.query.filter(Ticket.ticket_uid.in_(uids)).update(
-            {'status': new_status, 'updated_at': now, 'updated_by': current_user.user_uid},
-            synchronize_session=False,
-        )
-        db.session.commit()
-        return jsonify({'success': True})
-
     else:
         return jsonify({'error': 'Неизвестное действие'}), 400
 
     ticket.updated_at = now
     ticket.updated_by = current_user.user_uid
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+# ============================================================
+# TICKET API — BULK UPDATE
+# ============================================================
+
+@app.route('/api/tickets/bulk', methods=['POST'])
+@login_required
+def bulk_update_tickets():
+    if not is_specialist():
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    data       = request.get_json() or {}
+    action     = data.get('action')
+    new_status = data.get('status')
+    uids       = data.get('ticket_uids', [])
+    valid_statuses = ['in_progress', 'on_hold', 'resolved', 'closed', 'cancelled']
+    if action != 'bulk_status':
+        return jsonify({'error': 'Неизвестное действие'}), 400
+    if new_status not in valid_statuses:
+        return jsonify({'error': 'Недопустимый статус'}), 400
+    if not uids:
+        return jsonify({'error': 'Нет заявок для обновления'}), 400
+    now = datetime.utcnow()
+    Ticket.query.filter(Ticket.ticket_uid.in_(uids)).update(
+        {'status': new_status, 'updated_at': now, 'updated_by': current_user.user_uid},
+        synchronize_session=False,
+    )
     db.session.commit()
     return jsonify({'success': True})
 
@@ -1166,9 +1279,19 @@ def create_user():
         wg_uid      = request.form.get('work_group_uid') or None
         manager_uid = request.form.get('manager_uid') or None
 
+        form_data = {
+            'last_name': last_name, 'first_name': first_name,
+            'middle_name': middle_name or '', 'email': email,
+            'mobile': request.form.get('mobile', '').strip(),
+            'work_phone': request.form.get('work_phone', '').strip(),
+            'gender': gender or '', 'title': title or '',
+            'department': department or '', 'company': company or '',
+            'role': role, 'work_group_uid': wg_uid or '',
+            'manager_uid': manager_uid or '',
+        }
         if User.query.filter_by(email=email).first():
             return render_template('create_user.html', work_groups=work_groups,
-                                   all_users=all_users,
+                                   all_users=all_users, form_data=form_data,
                                    error='Пользователь с таким email уже существует')
         try:
             user_name, temp_pw = create_user_db(
@@ -1183,8 +1306,22 @@ def create_user():
                                    temp_login=user_name, temp_password=temp_pw)
         except Exception as e:
             db.session.rollback()
+            err_str = str(e)
+            if 'value too long' in err_str or 'StringDataRightTruncation' in err_str:
+                error = 'Одно из полей слишком длинное (телефон, должность и т.п.). Проверьте данные.'
+            elif 'unique' in err_str.lower() or 'UniqueViolation' in err_str:
+                if 'email' in err_str:
+                    error = 'Пользователь с таким email уже существует.'
+                elif 'user_name' in err_str:
+                    error = 'Сгенерированный логин уже занят, попробуйте ещё раз.'
+                else:
+                    error = 'Нарушение уникальности: такие данные уже есть в системе.'
+            elif 'not-null' in err_str.lower() or 'null value' in err_str.lower():
+                error = 'Не заполнено обязательное поле. Проверьте Фамилию, Имя и Email.'
+            else:
+                error = 'Ошибка при создании пользователя. Проверьте введённые данные.'
             return render_template('create_user.html', work_groups=work_groups,
-                                   all_users=all_users, error=f'Ошибка: {e}')
+                                   all_users=all_users, form_data=form_data, error=error)
 
     return render_template('create_user.html', work_groups=work_groups,
                            all_users=all_users, error=None)
@@ -1203,15 +1340,17 @@ def edit_user(user_uid):
     ).order_by(User.last_name).all()
 
     if request.method == 'POST':
-        user.first_name     = request.form.get('first_name', '').strip() or user.first_name
-        user.last_name      = request.form.get('last_name', '').strip() or user.last_name
-        user.middel_name    = request.form.get('middle_name', '').strip() or user.middel_name
-        user.email          = request.form.get('email', '').strip() or user.email
-        user.mobile         = format_mobile(request.form.get('mobile', '')) or user.mobile
-        user.work_phone     = request.form.get('work_phone', '').strip() or user.work_phone
-        user.title          = request.form.get('title', '').strip() or user.title
-        user.department     = request.form.get('department', '').strip() or user.department
-        user.company        = request.form.get('company', '').strip() or user.company
+        # Required fields: keep old value only if form sends empty string
+        user.first_name  = request.form.get('first_name', '').strip() or user.first_name
+        user.last_name   = request.form.get('last_name', '').strip() or user.last_name
+        user.email       = request.form.get('email', '').strip() or user.email
+        # Optional fields: allow clearing by setting to None when blank
+        user.middel_name = request.form.get('middle_name', '').strip() or None
+        user.mobile      = format_mobile(request.form.get('mobile', '').strip()) or None
+        user.work_phone  = request.form.get('work_phone', '').strip() or None
+        user.title       = request.form.get('title', '').strip() or None
+        user.department  = request.form.get('department', '').strip() or None
+        user.company     = request.form.get('company', '').strip() or None
         user.manager_uid    = request.form.get('manager_uid') or None
         user.is_deactivated = 'is_deactivated' in request.form
         user.update_date    = datetime.utcnow()
@@ -1343,13 +1482,40 @@ def edit_category(cat_uid):
                            work_groups=work_groups, top_cats=top_cats, slas=slas)
 
 
+@app.route('/admin/toggle-category/<cat_uid>', methods=['POST'])
+@login_required
+def toggle_category(cat_uid):
+    if current_user.role != 'admin':
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    cat = ServiceCatalog.query.get_or_404(cat_uid)
+    cat.is_active = not cat.is_active
+    db.session.commit()
+    return jsonify({'success': True, 'is_active': cat.is_active})
+
+
 @app.route('/admin/delete-category/<cat_uid>', methods=['POST'])
 @login_required
 def delete_category(cat_uid):
     if current_user.role != 'admin':
         return jsonify({'error': 'Доступ запрещён'}), 403
     cat = ServiceCatalog.query.get_or_404(cat_uid)
-    cat.is_active = False
+    ticket_count = Ticket.query.filter_by(catalog_uid=cat_uid).count()
+    if ticket_count > 0:
+        return jsonify({
+            'error': f'Нельзя удалить: к этой категории привязано {ticket_count} заявок. '
+                     f'Сначала скройте её (глазик), чтобы запретить новые заявки.'
+        }), 400
+    # Also delete child services if this is a top-level category
+    for child in cat.children.all():
+        if Ticket.query.filter_by(catalog_uid=child.catalog_uid).count() == 0:
+            db.session.delete(child)
+        else:
+            return jsonify({
+                'error': f'Нельзя удалить: дочерняя услуга «{child.catalog_name}» имеет привязанные заявки.'
+            }), 400
+    audit(current_user.user_uid, 'delete_category', 'service_catalog', cat_uid,
+          f'Удалена категория {cat.catalog_name}', request.remote_addr)
+    db.session.delete(cat)
     db.session.commit()
     return jsonify({'success': True})
 
@@ -1405,4 +1571,5 @@ def delete_work_group(wg_uid):
 # ============================================================
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug, host='0.0.0.0', port=5000)
