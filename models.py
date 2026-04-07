@@ -28,8 +28,8 @@ class User(UserMixin, db.Model):
     last_name = db.Column(db.String(100), nullable=False)
     middel_name = db.Column(db.String(100), nullable=True)
     email = db.Column(db.String(255), unique=True, nullable=False)
-    mobile = db.Column(db.String(15), nullable=True)
-    work_phone = db.Column(db.String(15), nullable=True)
+    mobile = db.Column(db.String(20), nullable=True)
+    work_phone = db.Column(db.String(20), nullable=True)
     gender = db.Column(db.String(1), nullable=True)
     title = db.Column(db.String(255), nullable=True)
     department = db.Column(db.String(255), nullable=True)
@@ -92,10 +92,7 @@ class User(UserMixin, db.Model):
     def all_work_groups(self):
         return [l.work_group for l in self.work_group_links.order_by(UserWorkGroup.assigned_date).all()]
 
-    def avatar_emoji(self):
-        return ''
-
-
+      
 # ---------------------------------------------------------------------------
 # sm.passwords
 # ---------------------------------------------------------------------------
