@@ -51,7 +51,7 @@
   --shadow-sm:0 2px 8px rgba(0,0,0,.3);
 
   --navbar-h: 58px;
-  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --font: 'Segoe UI', Tahoma, Arial, system-ui, -apple-system, sans-serif;
 }
 
 /* ---- Reset ---- */
@@ -68,6 +68,18 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); }
 button { cursor: pointer; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
+
+/* Avatars removed by request */
+.nav-avatar,
+.td-avatar,
+.card-avatar,
+.profile-avatar-section,
+.user-profile-avatar,
+.avatar-picker,
+.avatar-grid,
+.avatar-option {
+  display: none !important;
+}
 
 /* =========================================================
    NAVBAR
