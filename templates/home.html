@@ -1,297 +1,54 @@
 {% extends "base.html" %}
-{% block title %}Главная — Service Desk{% endblock %}
+{% block title %}Главная{% endblock %}
 {% block content %}
-
-<div class="page-home">
-
-  <!-- Search bar -->
-  <div class="home-search-bar">
-    <form method="GET" action="/" class="search-form">
-      <div class="search-input-wrap">
-        <i data-feather="search" class="search-icon"></i>
-        <input class="search-input" type="text" name="q" value="{{ q }}"
-               placeholder="Поиск по номеру, теме или категории...">
-        <input type="hidden" name="view" value="{{ view }}">
-        {% if q %}
-        <a href="/?view={{ view }}" class="search-clear"><i data-feather="x"></i></a>
-        {% endif %}
-      </div>
-      <button class="btn btn-primary" type="submit">Найти</button>
-    </form>
-  </div>
-
-  <!-- View switcher (Bug #15 / Дор. #15) -->
-  <div class="view-switcher">
-    <a href="/?view=catalog{% if q %}&q={{ q }}{% endif %}"
-       class="view-tab {% if view == 'catalog' %}active{% endif %}">
-      <i data-feather="grid"></i> Каталог услуг
-    </a>
-    <a href="/?view=my_tickets{% if q %}&q={{ q }}{% endif %}"
-       class="view-tab {% if view == 'my_tickets' %}active{% endif %}">
-      <i data-feather="inbox"></i> Мои заявки
-    </a>
-  </div>
-
-  <!-- Search results overlay -->
-  {% if q and search_results is not none %}
-  <div class="search-results-section">
-    <h3 class="section-title">
-      Результаты поиска: «{{ q }}»
-      <span class="count-badge">{{ search_results|length }}</span>
-    </h3>
-    {% if search_results %}
-    <div class="ticket-list-compact">
-      {% for t in search_results %}
-      <div class="ticket-row" onclick="openTicket('{{ t.ticket_uid }}')">
-        <span class="ticket-row-num">{{ t.ticket_number }}</span>
-        <span class="ticket-row-summary">{{ t.summary }}</span>
-        <span class="ticket-row-cat">{{ t.catalog.catalog_name if t.catalog else '—' }}</span>
-        <span class="status-badge status-{{ t.status }}">{{ t.status|status_label }}</span>
-        <span class="ticket-row-date">{{ t.created_at|datefmt }}</span>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="empty-state">
-      <i data-feather="search"></i>
-      <p>Ничего не найдено по запросу «{{ q }}»</p>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <!-- CATALOG VIEW -->
-  {% if view == 'catalog' and not (q and search_results is not none) %}
-  <div class="catalog-grid">
-    {% for cat in categories %}
-    <div class="catalog-section">
-      <div class="catalog-section-header">
-        <i data-feather="{{ cat.catalog_icon or 'folder' }}"></i>
-        <h3>{{ cat.catalog_name }}</h3>
-        {% if cat.catalog_description %}
-        <p class="catalog-section-desc">{{ cat.catalog_description }}</p>
-        {% endif %}
-      </div>
-      <div class="catalog-services">
-        {% if cat._children %}
+<div class="card">
+  <h2>Создать заявку</h2>
+  <div class="grid grid-2">
+    <div>
+      <label>Услуга</label>
+      <select id="new_catalog_uid">
+        {% for cat in categories %}
           {% for svc in cat._children %}
-          <button class="catalog-service-card"
-                  onclick="openNewTicketFromCatalog('{{ svc.catalog_uid }}', '{{ svc.catalog_name|replace("'","\\'")|e }}')">
-            <div class="svc-icon"><i data-feather="{{ svc.catalog_icon or 'file' }}"></i></div>
-            <div class="svc-info">
-              <span class="svc-name">{{ svc.catalog_name }}</span>
-              {% if svc.catalog_description %}
-              <span class="svc-desc">{{ svc.catalog_description }}</span>
-              {% endif %}
-              <div class="svc-tags">
-                {% if svc.approval_required %}
-                <span class="tag tag-approval"><i data-feather="check-circle"></i> Согласование</span>
-                {% endif %}
-                <span class="tag tag-type">{{ 'Инцидент' if svc.ticket_type == 'incident' else 'Запрос' }}</span>
-              </div>
-            </div>
-          </button>
+          <option value="{{ svc.catalog_uid }}">{{ cat.catalog_name }} / {{ svc.catalog_name }}</option>
           {% endfor %}
-        {% else %}
-          <div class="catalog-empty">Услуги не настроены</div>
-        {% endif %}
-      </div>
+        {% endfor %}
+      </select>
     </div>
-    {% endfor %}
+    <div><label>Тема</label><input id="new_summary" type="text" placeholder="Кратко опишите проблему"></div>
   </div>
-  {% endif %}
+  <div style="margin-top:10px;"><label>Описание</label><textarea id="new_description" rows="4"></textarea></div>
+  <div class="actions" style="margin-top:10px;"><button class="btn btn-primary" onclick="createTicket()">Отправить</button></div>
+</div>
 
-  <!-- MY TICKETS VIEW -->
-  {% if view == 'my_tickets' and my_tickets is not none %}
-  <div class="my-tickets-section">
-    {% if my_tickets %}
-    <div class="ticket-list-compact">
-      {% for t in my_tickets %}
-      <div class="ticket-row {% if t.is_overdue() %}row-overdue{% endif %}"
-           onclick="openTicket('{{ t.ticket_uid }}')">
-        <span class="ticket-row-num">{{ t.ticket_number }}</span>
-        <span class="ticket-row-summary">{{ t.summary }}</span>
-        <span class="ticket-row-cat">{{ t.catalog.catalog_name if t.catalog else '—' }}</span>
-        <span class="status-badge status-{{ t.status }}">{{ t.status|status_label }}</span>
-        <span class="priority-dot priority-{{ t.priority }}" title="{{ t.priority|priority_label }}"></span>
-        <span class="ticket-row-date">
-          {% if t.deadline_at %}
-            {% if t.is_overdue() %}
-            <span class="overdue-label"><i data-feather="alert-circle"></i> {{ t.deadline_at|datefmt }}</span>
-            {% else %}
-            {{ t.deadline_at|datefmt }}
-            {% endif %}
-          {% else %}
-          {{ t.created_at|datefmt }}
-          {% endif %}
-        </span>
-      </div>
-      {% endfor %}
-    </div>
+<div class="card">
+  <h3>Каталог услуг</h3>
+  {% for cat in categories %}
+    <p><strong>{{ cat.catalog_name }}</strong>: 
+    {% for svc in cat._children %}
+      <span class="badge">{{ svc.catalog_name }}</span>
     {% else %}
-    <div class="empty-state">
-      <i data-feather="inbox"></i>
-      <p>У вас нет заявок</p>
-      <a href="/?view=catalog" class="btn btn-primary">Создать заявку</a>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-
+      <span class="muted">нет услуг</span>
+    {% endfor %}</p>
+  {% endfor %}
 </div>
 
-<!-- New Ticket Modal -->
-<div class="modal-overlay" id="newTicketOverlay" style="display:none">
-  <div class="modal modal-new-ticket" id="newTicketModal">
-    <div class="modal-header">
-      <div>
-        <h3 id="newTicketTitle">Новая заявка</h3>
-        <p class="modal-subtitle" id="newTicketSubtitle"></p>
-      </div>
-      <button class="modal-close" id="newTicketClose"><i data-feather="x"></i></button>
-    </div>
-    <div class="modal-body">
-
-      <!-- Template picker -->
-      <div id="tplPickerWrap" style="display:none" class="form-group">
-        <label class="form-label">Шаблон</label>
-        <select id="tplSelect" class="form-select" onchange="applyTemplate(this.value)">
-          <option value="">— Без шаблона —</option>
-        </select>
-      </div>
-
-      <!-- Approval notice -->
-      <div id="approvalNotice" style="display:none" class="alert alert-info">
-        <i data-feather="check-square"></i>
-        Эта услуга требует согласования. Заявка будет отправлена на согласование руководителю.
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Тема <span class="required">*</span></label>
-        <input class="form-input" type="text" id="newTicketSummary"
-               placeholder="Кратко опишите проблему или запрос">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Описание <span class="required">*</span></label>
-        <textarea class="form-textarea" id="newTicketDesc" rows="5"
-                  placeholder="Подробно опишите ситуацию, шаги для воспроизведения, что нужно сделать..."></textarea>
-      </div>
-
-      <!-- Save as template -->
-      <details class="collapsible">
-        <summary>Сохранить как шаблон</summary>
-        <div class="form-group mt-1">
-          <input class="form-input" type="text" id="tplSaveName"
-                 placeholder="Название шаблона">
-        </div>
-      </details>
-
-      <input type="hidden" id="newTicketCatalogUid">
-
-      <div class="modal-footer">
-        <button class="btn btn-ghost" id="newTicketCancel">Отмена</button>
-        <button class="btn btn-primary" id="newTicketSubmit">
-          <i data-feather="send"></i> Отправить заявку
-        </button>
-      </div>
-    </div>
-  </div>
+{% if my_tickets %}
+<div class="card">
+  <h3>Мои заявки</h3>
+  <table class="table">
+    <tr><th>Номер</th><th>Тема</th><th>Статус</th><th>Создана</th></tr>
+    {% for t in my_tickets %}<tr><td>{{ t.ticket_number }}</td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td><td>{{ t.created_at|datefmt }}</td></tr>{% endfor %}
+  </table>
 </div>
+{% endif %}
 
-{% endblock %}
-
-{% block scripts %}
-<script>
-let _catalogCache = {};
-let _templateCache = {};
-
-async function openNewTicketFromCatalog(catalogUid, catalogName) {
-  document.getElementById('newTicketCatalogUid').value = catalogUid;
-  document.getElementById('newTicketTitle').textContent = catalogName;
-  document.getElementById('newTicketSummary').value = '';
-  document.getElementById('newTicketDesc').value = '';
-  document.getElementById('tplSaveName').value = '';
-  document.getElementById('approvalNotice').style.display = 'none';
-  document.getElementById('tplPickerWrap').style.display = 'none';
-
-  // Fetch catalog metadata
-  try {
-    const r = await fetch(`/api/catalog/${catalogUid}`);
-    const d = await r.json();
-    _catalogCache[catalogUid] = d;
-    document.getElementById('newTicketSubtitle').textContent = d.catalog_description || '';
-    if (d.approval_required)
-      document.getElementById('approvalNotice').style.display = 'flex';
-    // Load templates
-    if (d.templates && d.templates.length) {
-      const sel = document.getElementById('tplSelect');
-      sel.innerHTML = '<option value="">— Без шаблона —</option>';
-      d.templates.forEach(t => {
-        sel.innerHTML += `<option value="${t.uid}" data-summary="${t.summary||''}" data-desc="${t.description||''}">${t.name}</option>`;
-      });
-      _templateCache = {};
-      d.templates.forEach(t => { _templateCache[t.uid] = t; });
-      document.getElementById('tplPickerWrap').style.display = '';
-    }
-  } catch(e) {}
-
-  document.getElementById('newTicketOverlay').style.display = 'flex';
-  feather.replace();
-  document.getElementById('newTicketSummary').focus();
-}
-
-function applyTemplate(uid) {
-  if (!uid) return;
-  const t = _templateCache[uid];
-  if (!t) return;
-  if (t.summary) document.getElementById('newTicketSummary').value = t.summary;
-  if (t.description) document.getElementById('newTicketDesc').value = t.description;
-}
-
-function closeNewTicket() {
-  document.getElementById('newTicketOverlay').style.display = 'none';
-}
-
-document.getElementById('newTicketClose').onclick = closeNewTicket;
-document.getElementById('newTicketCancel').onclick = closeNewTicket;
-document.getElementById('newTicketOverlay').onclick = function(e) {
-  if (e.target === this) closeNewTicket();
-};
-
-document.getElementById('newTicketSubmit').onclick = async function() {
-  const summary = document.getElementById('newTicketSummary').value.trim();
-  const desc    = document.getElementById('newTicketDesc').value.trim();
-  const uid     = document.getElementById('newTicketCatalogUid').value;
-  const tpl     = document.getElementById('tplSaveName').value.trim();
-
-  if (!summary || !desc) {
-    showToast('Заполните тему и описание', 'error');
-    return;
-  }
-  this.disabled = true;
-  this.textContent = 'Отправка...';
-
-  try {
-    const r = await fetch('/api/tickets', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({summary, description: desc,
-                            catalog_uid: uid, save_as_template: tpl})
-    });
-    const d = await r.json();
-    if (d.success) {
-      closeNewTicket();
-      showToast(`Заявка ${d.ticket_number} создана`, 'success');
-      setTimeout(() => location.reload(), 800);
-    } else {
-      showToast(d.error || 'Ошибка', 'error');
-    }
-  } catch(e) {
-    showToast('Ошибка сети', 'error');
-  }
-  this.disabled = false;
-  this.innerHTML = '<i data-feather="send"></i> Отправить заявку';
-  feather.replace();
-};
-</script>
+{% if search_results %}
+<div class="card">
+  <h3>Результаты поиска: {{ q }}</h3>
+  <table class="table">
+    <tr><th>Номер</th><th>Тема</th><th>Статус</th></tr>
+    {% for t in search_results %}<tr><td>{{ t.ticket_number }}</td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
 {% endblock %}

@@ -1,175 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Профиль — Service Desk{% endblock %}
+{% block title %}Профиль{% endblock %}
 {% block content %}
-
-<div class="page-profile">
-  <div class="profile-layout">
-
-    <!-- LEFT: profile card -->
-    <div class="profile-card">
-      <!-- Avatar section (Дор. #14) -->
-      <div class="profile-avatar-section">
-        <div class="profile-avatar-big" id="profileAvatarBig">
-          {{ current_user.avatar_emoji() }}
-        </div>
-        <button class="btn btn-ghost btn-sm" id="avatarChangeBtn">
-          <i data-feather="edit-2"></i> Сменить аватар
-        </button>
-      </div>
-
-      <!-- Avatar picker modal -->
-      <div class="avatar-picker" id="avatarPicker" style="display:none">
-        <form method="POST" action="/profile/avatar" id="avatarForm">
-          <div class="avatar-grid">
-            {% for av in AVATAR_LIST %}
-            {% set emoji_map = {
-              'cat':'🐱','dog':'🐶','fox':'🦊','bear':'🐻','penguin':'🐧',
-              'owl':'🦉','tiger':'🐯','rabbit':'🐰','wolf':'🐺','panda':'🐼',
-              'frog':'🐸','lion':'🦁','koala':'🐨','duck':'🐥','dragon':'🐲'
-            } %}
-            <button type="button" class="avatar-option {% if current_user.avatar == av %}selected{% endif %}"
-                    data-av="{{ av }}" onclick="selectAvatar('{{ av }}')">
-              {{ emoji_map[av] }}
-            </button>
-            {% endfor %}
-          </div>
-          <input type="hidden" name="avatar" id="avatarInput" value="{{ current_user.avatar }}">
-          <div class="avatar-picker-actions">
-            <button type="button" class="btn btn-ghost btn-sm" id="avatarCancel">Отмена</button>
-            <button type="submit" class="btn btn-primary btn-sm">Сохранить</button>
-          </div>
-        </form>
-      </div>
-
-      <div class="profile-name">{{ current_user.full_name() }}</div>
-      <div class="profile-role">{{ current_user.role }}</div>
-
-      <!-- Info grid (read-only, Bug #6 fix) -->
-      <div class="profile-info-grid">
-        <div class="info-row">
-          <i data-feather="mail"></i>
-          <span>{{ current_user.email or '—' }}</span>
-        </div>
-        <div class="info-row">
-          <i data-feather="phone"></i>
-          <span>{{ current_user.mobile or current_user.work_phone or '—' }}</span>
-        </div>
-        <div class="info-row">
-          <i data-feather="briefcase"></i>
-          <span>{{ current_user.title or '—' }}</span>
-        </div>
-        <div class="info-row">
-          <i data-feather="layers"></i>
-          <span>{{ current_user.department or '—' }}</span>
-        </div>
-        <div class="info-row">
-          <i data-feather="home"></i>
-          <span>{{ current_user.company or '—' }}</span>
-        </div>
-        {% if manager %}
-        <div class="info-row">
-          <i data-feather="user"></i>
-          <span>Руководитель:
-            <a href="/user/{{ manager.user_uid }}">{{ manager.full_name() }}</a>
-          </span>
-        </div>
-        {% endif %}
-        {% if current_user.last_loggon_date %}
-        <div class="info-row">
-          <i data-feather="clock"></i>
-          <span>Последний вход: {{ current_user.last_loggon_date|datefmt }}</span>
-        </div>
-        {% endif %}
-      </div>
-
-      <!-- Work groups (Дор. #13) -->
-      {% set wgs = current_user.all_work_groups() %}
-      {% if wgs %}
-      <div class="profile-wg-list">
-        {% for wg in wgs %}
-        <span class="wg-tag">{{ wg.group_name }}</span>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      <!-- Change password (Bug #7: only password here) -->
-      <div class="profile-pwd-section">
-        <h4><i data-feather="lock"></i> Сменить пароль</h4>
-        <form method="POST" action="/profile/password">
-          <div class="form-group">
-            <label class="form-label">Текущий пароль</label>
-            <div class="input-icon-wrap input-with-toggle">
-              <input class="form-input" type="password" name="old_password" id="oldPw" required>
-              <button type="button" class="pwd-toggle" onclick="togglePwd('oldPw',this)">
-                <i data-feather="eye"></i>
-              </button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Новый пароль</label>
-            <div class="input-icon-wrap input-with-toggle">
-              <input class="form-input" type="password" name="new_password" id="newPw" required>
-              <button type="button" class="pwd-toggle" onclick="togglePwd('newPw',this)">
-                <i data-feather="eye"></i>
-              </button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Подтверждение</label>
-            <input class="form-input" type="password" name="confirm_password" required>
-          </div>
-          <button type="submit" class="btn btn-outline btn-sm btn-block">
-            <i data-feather="check"></i> Изменить пароль
-          </button>
-        </form>
-      </div>
-    </div>
-
-    <!-- RIGHT: tickets history -->
-    <div class="profile-tickets">
-      <h3 class="section-title">Мои заявки</h3>
-      {% if tickets %}
-      <div class="ticket-list-compact">
-        {% for t in tickets %}
-        <div class="ticket-row {% if t.is_overdue() %}row-overdue{% endif %}"
-             onclick="openTicket('{{ t.ticket_uid }}')">
-          <span class="ticket-row-num">{{ t.ticket_number }}</span>
-          <span class="ticket-row-summary">{{ t.summary }}</span>
-          <span class="ticket-row-cat">{{ t.catalog.catalog_name if t.catalog else '—' }}</span>
-          <span class="status-badge status-{{ t.status }}">{{ t.status|status_label }}</span>
-          <span class="ticket-row-date">{{ t.created_at|datefmt }}</span>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <div class="empty-state">
-        <i data-feather="inbox"></i>
-        <p>Нет заявок</p>
-      </div>
-      {% endif %}
-    </div>
-
+<div class="grid grid-2">
+  <div class="card">
+    <h2>{{ current_user.full_name() }}</h2>
+    <p class="muted">{{ current_user.role|role_label }}</p>
+    <p>Email: {{ current_user.email or '—' }}</p>
+    <p>Телефон: {{ current_user.mobile or current_user.work_phone or '—' }}</p>
+    <p>Должность: {{ current_user.title or '—' }}</p>
+    {% if manager %}<p>Руководитель: <a href="/user/{{ manager.user_uid }}">{{ manager.full_name() }}</a></p>{% endif %}
+  </div>
+  <div class="card">
+    <h3>Сменить пароль</h3>
+    <form method="post" action="/profile/password" class="grid">
+      <input type="password" name="old_password" placeholder="Текущий пароль" required>
+      <input type="password" name="new_password" placeholder="Новый пароль" required>
+      <input type="password" name="confirm_password" placeholder="Подтверждение" required>
+      <button class="btn btn-primary" type="submit">Изменить пароль</button>
+    </form>
   </div>
 </div>
-
-<script>
-document.getElementById('avatarChangeBtn').onclick = function() {
-  document.getElementById('avatarPicker').style.display = '';
-};
-document.getElementById('avatarCancel').onclick = function() {
-  document.getElementById('avatarPicker').style.display = 'none';
-};
-function selectAvatar(av) {
-  document.querySelectorAll('.avatar-option').forEach(b => b.classList.remove('selected'));
-  document.querySelector(`.avatar-option[data-av="${av}"]`).classList.add('selected');
-  document.getElementById('avatarInput').value = av;
-}
-function togglePwd(id, btn) {
-  const inp = document.getElementById(id);
-  inp.type = inp.type === 'password' ? 'text' : 'password';
-  btn.querySelector('[data-feather]').setAttribute('data-feather',
-    inp.type === 'password' ? 'eye' : 'eye-off');
-  feather.replace();
-}
-</script>
+<div class="card">
+  <h3>Последние заявки</h3>
+  <table class="table">
+    <tr><th>Номер</th><th>Тема</th><th>Статус</th><th>Дата</th></tr>
+    {% for t in tickets %}<tr><td>{{ t.ticket_number }}</td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td><td>{{ t.created_at|datefmt }}</td></tr>{% endfor %}
+  </table>
+</div>
 {% endblock %}

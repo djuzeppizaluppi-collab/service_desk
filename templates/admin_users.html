@@ -1,160 +1,26 @@
 {% extends "base.html" %}
-{% block title %}Пользователи — Админ{% endblock %}
+{% block title %}Пользователи{% endblock %}
 {% block content %}
-
-<div class="page-admin">
-  <div class="page-header">
-    <h1 class="page-title"><i data-feather="users"></i> Пользователи</h1>
-    <a href="{{ url_for('create_user') }}" class="btn btn-primary">
-      <i data-feather="user-plus"></i> Добавить
-    </a>
-  </div>
-
-  <!-- Filter -->
-  <div class="admin-filter-bar">
-    <input class="form-input" type="text" id="userSearch"
-           placeholder="Поиск по имени, email, логину..." oninput="filterUsers()">
-    <select class="filter-select" id="roleFilter" onchange="filterUsers()">
-      <option value="">Все роли</option>
-      <option value="admin">Администратор</option>
-      <option value="manager">Менеджер</option>
-      <option value="specialist">Специалист</option>
-      <option value="user">Пользователь</option>
-    </select>
-    <select class="filter-select" id="wgFilter" onchange="filterUsers()">
-      <option value="">Все группы</option>
-      {% for wg in work_groups %}
-      <option value="{{ wg.group_name }}">{{ wg.group_name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-
-  <div class="table-wrap">
-    <table class="admin-table" id="usersTable">
-      <thead>
-        <tr>
-          <th>Аватар</th>
-          <th>ФИО</th>
-          <th>Логин</th>
-          <th>Email</th>
-          <th>Должность</th>
-          <th>Роль</th>
-          <th>Группа</th> <!-- Дор. #12 -->
-          <th>Руководитель</th> <!-- Дор. #12 -->
-          <th>Статус</th>
-          <th>Действия</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for u in users %}
-        {% set wgs = u.all_work_groups() %}
-        {% set mgr = User.query.get(u.manager_uid) if u.manager_uid else None %}
-        <tr class="urow {% if u.is_deactivated %}row-deactivated{% endif %}"
-            data-name="{{ u.full_name()|lower }}"
-            data-email="{{ (u.email or '')|lower }}"
-            data-login="{{ u.user_name|lower }}"
-            data-role="{{ u.role }}"
-            data-wg="{{ wgs[0].group_name if wgs else '' }}">
-          <td class="td-avatar">{{ u.avatar_emoji() }}</td>
-          <td>
-            <a href="/user/{{ u.user_uid }}" class="user-name-link">{{ u.full_name() }}</a>
-          </td>
-          <td class="td-mono">{{ u.user_name }}</td>
-          <td>{{ u.email or '—' }}</td>
-          <td>{{ u.title or '—' }}</td>
-          <td><span class="role-badge role-{{ u.role }}">{{ u.role }}</span></td>
-          <td>{{ wgs[0].group_name if wgs else '—' }}</td>
-          <td>
-            {% if mgr %}
-            <a href="/user/{{ mgr.user_uid }}" class="user-chip-sm">
-              {{ mgr.avatar_emoji() }} {{ mgr.full_name() }}
-            </a>
-            {% else %}—{% endif %}
-          </td>
-          <td>
-            {% if u.is_deactivated %}
-            <span class="tag tag-inactive">Деактивирован</span>
-            {% else %}
-            <span class="tag tag-active">Активен</span>
-            {% endif %}
-          </td>
-          <td class="td-actions">
-            <a href="{{ url_for('edit_user', user_uid=u.user_uid) }}" class="btn-icon" title="Редактировать">
-              <i data-feather="edit-2"></i>
-            </a>
-            <button class="btn-icon btn-icon-warning" title="Сбросить пароль"
-                    onclick="resetPwd('{{ u.user_uid }}', '{{ u.full_name()|replace("'","\\'") }}')">
-              <i data-feather="refresh-cw"></i>
-            </button>
-            {% if u.user_uid != current_user.user_uid %}
-            <button class="btn-icon btn-icon-danger" title="Деактивировать"
-                    onclick="deactivateUser('{{ u.user_uid }}', '{{ u.full_name()|replace("'","\\'") }}')">
-              <i data-feather="user-x"></i>
-            </button>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<div class="card">
+  <div class="inline" style="justify-content:space-between;"><h2>Пользователи</h2><a class="btn btn-primary" href="{{ url_for('create_user') }}">Создать пользователя</a></div>
+  <table class="table">
+    <tr><th>ФИО</th><th>Логин</th><th>Email</th><th>Роль</th><th>Группа</th><th>Статус</th><th>Действия</th></tr>
+    {% for u in users %}
+    {% set wgs = u.all_work_groups() %}
+    <tr>
+      <td><a href="/user/{{ u.user_uid }}">{{ u.full_name() }}</a></td>
+      <td>{{ u.user_name }}</td>
+      <td>{{ u.email or '—' }}</td>
+      <td>{{ u.role|role_label }}</td>
+      <td>{{ wgs[0].group_name if wgs else '—' }}</td>
+      <td>{{ 'Деактивирован' if u.is_deactivated else 'Активен' }}</td>
+      <td class="actions">
+        <a class="btn" href="{{ url_for('edit_user', user_uid=u.user_uid) }}">Редактировать</a>
+        <button class="btn" onclick="resetPassword('{{ u.user_uid }}')">Сброс пароля</button>
+        {% if u.user_uid != current_user.user_uid %}<button class="btn btn-danger" onclick="deactivateUser('{{ u.user_uid }}')">Деактивировать</button>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
 </div>
-
-<!-- Reset password result modal -->
-<div class="modal-overlay" id="resetPwdOverlay" style="display:none">
-  <div class="modal modal-sm">
-    <div class="modal-header">
-      <h3>Пароль сброшен</h3>
-      <button class="modal-close" onclick="document.getElementById('resetPwdOverlay').style.display='none'">
-        <i data-feather="x"></i>
-      </button>
-    </div>
-    <div class="modal-body">
-      <p>Временный пароль для <strong id="resetPwdName"></strong>:</p>
-      <div class="pwd-display" id="resetPwdValue"></div>
-      <p class="text-muted">Передайте пользователю. Он будет сброшен при первом входе.</p>
-    </div>
-  </div>
-</div>
-
-<script>
-function filterUsers() {
-  const q = document.getElementById('userSearch').value.toLowerCase();
-  const role = document.getElementById('roleFilter').value;
-  const wg = document.getElementById('wgFilter').value;
-  document.querySelectorAll('#usersTable .urow').forEach(row => {
-    const matchQ = !q || row.dataset.name.includes(q) ||
-                   row.dataset.email.includes(q) || row.dataset.login.includes(q);
-    const matchRole = !role || row.dataset.role === role;
-    const matchWg   = !wg   || row.dataset.wg === wg;
-    row.style.display = (matchQ && matchRole && matchWg) ? '' : 'none';
-  });
-}
-
-async function resetPwd(uid, name) {
-  if (!confirm(`Сбросить пароль для ${name}?`)) return;
-  const r = await fetch(`/admin/reset-password/${uid}`, {method:'POST'});
-  const d = await r.json();
-  if (d.success) {
-    document.getElementById('resetPwdName').textContent = name;
-    document.getElementById('resetPwdValue').textContent = d.new_password;
-    document.getElementById('resetPwdOverlay').style.display = 'flex';
-    feather.replace();
-  } else {
-    showToast(d.error || 'Ошибка', 'error');
-  }
-}
-
-async function deactivateUser(uid, name) {
-  if (!confirm(`Деактивировать пользователя ${name}?`)) return;
-  const r = await fetch(`/admin/delete-user/${uid}`, {method:'POST'});
-  const d = await r.json();
-  if (d.success) {
-    showToast(`${name} деактивирован`, 'success');
-    setTimeout(() => location.reload(), 600);
-  } else {
-    showToast(d.error || 'Ошибка', 'error');
-  }
-}
-</script>
 {% endblock %}

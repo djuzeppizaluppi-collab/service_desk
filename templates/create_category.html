@@ -1,82 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Добавить запись каталога{% endblock %}
+{% block title %}Создать категорию/услугу{% endblock %}
 {% block content %}
-<div class="page-admin">
-  <div class="page-header">
-    <h1 class="page-title"><i data-feather="plus"></i> Новая запись каталога</h1>
-    <a href="{{ url_for('admin_categories') }}" class="btn btn-ghost">
-      <i data-feather="arrow-left"></i> Назад
-    </a>
-  </div>
-  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
-  <div class="card"><div class="card-body">
-    <form method="POST">
-      <div class="form-group">
-        <label class="form-label">Тип</label>
-        <select class="form-select" name="parent_uid" id="parentSel" onchange="toggleType()">
-          <option value="">— Раздел (верхний уровень) —</option>
-          {% for c in top_cats %}
-          <option value="{{ c.catalog_uid }}">Услуга в разделе: {{ c.catalog_name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label class="form-label">Название <span class="required">*</span></label>
-          <input class="form-input" type="text" name="catalog_name" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Иконка (feather)</label>
-          <input class="form-input" type="text" name="catalog_icon" placeholder="folder" value="file">
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Описание</label>
-        <textarea class="form-textarea" name="catalog_description" rows="2"></textarea>
-      </div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label class="form-label">Рабочая группа</label>
-          <select class="form-select" name="work_group_uid">
-            <option value="">— Не указана —</option>
-            {% for wg in work_groups %}<option value="{{ wg.work_group_uid }}">{{ wg.group_name }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="form-group" id="svcFields">
-          <label class="form-label">Тип заявки</label>
-          <select class="form-select" name="ticket_type">
-            <option value="service_request">Запрос на обслуживание</option>
-            <option value="incident">Инцидент</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Приоритет по умолчанию</label>
-          <select class="form-select" name="priority">
-            <option value="low">Низкий</option>
-            <option value="medium" selected>Средний</option>
-            <option value="high">Высокий</option>
-            <option value="critical">Критический</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">SLA</label>
-          <select class="form-select" name="sla_uid">
-            <option value="">— Без SLA —</option>
-            {% for s in slas %}<option value="{{ s.sla_uid }}">{{ s.policy_name }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="checkbox-label">
-          <input type="checkbox" name="approval_required">
-          <span>Требует согласования</span>
-        </label>
-      </div>
-      <div class="modal-footer">
-        <a href="{{ url_for('admin_categories') }}" class="btn btn-ghost">Отмена</a>
-        <button type="submit" class="btn btn-primary"><i data-feather="save"></i> Создать</button>
-      </div>
-    </form>
-  </div></div>
+<div class="card">
+  <h2>Новая запись каталога</h2>
+  <form method="post" class="grid grid-2">
+    <input name="catalog_name" placeholder="Название" required>
+    <input name="catalog_icon" placeholder="Иконка" value="briefcase">
+    <textarea name="catalog_description" placeholder="Описание"></textarea>
+    <select name="work_group_uid"><option value="">Рабочая группа</option>{% for wg in work_groups %}<option value="{{ wg.work_group_uid }}">{{ wg.group_name }}</option>{% endfor %}</select>
+    <select name="parent_uid"><option value="">Это категория (верхний уровень)</option>{% for c in top_cats %}<option value="{{ c.catalog_uid }}">Услуга внутри: {{ c.catalog_name }}</option>{% endfor %}</select>
+    <select name="ticket_type"><option value="service_request">Service Request</option><option value="incident">Incident</option></select>
+    <select name="priority"><option value="low">Низкий</option><option value="medium" selected>Средний</option><option value="high">Высокий</option><option value="critical">Критический</option></select>
+    <select name="sla_uid"><option value="">SLA</option>{% for s in slas %}<option value="{{ s.sla_uid }}">{{ s.sla_name }}</option>{% endfor %}</select>
+    <label><input type="checkbox" name="approval_required"> Требует согласования</label>
+    <div class="actions"><button class="btn btn-primary" type="submit">Сохранить</button><a class="btn" href="{{ url_for('admin_categories') }}">Назад</a></div>
+  </form>
 </div>
 {% endblock %}

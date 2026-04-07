@@ -1,159 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Создать пользователя{% endblock %}
 {% block content %}
-<div class="page-admin">
-  <div class="page-header">
-    <h1 class="page-title"><i data-feather="user-plus"></i> Новый пользователь</h1>
-    <a href="{{ url_for('admin_users') }}" class="btn btn-ghost">
-      <i data-feather="arrow-left"></i> Назад
-    </a>
-  </div>
-
+<div class="card">
+  <h2>Новый пользователь</h2>
+  {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
   {% if success %}
-  <div class="card card-success-result">
-    <div class="card-body">
-      <h3><i data-feather="check-circle"></i> Пользователь создан</h3>
-      <div class="cred-block">
-        <div><span class="cred-label">Логин:</span> <strong id="tl">{{ temp_login }}</strong></div>
-        <div><span class="cred-label">Пароль:</span> <strong id="tp">{{ temp_password }}</strong></div>
-      </div>
-      <p class="text-muted">Передайте данные пользователю. Он сменит пароль при первом входе.</p>
-      <div class="btn-group">
-        <a href="{{ url_for('create_user') }}" class="btn btn-primary">Создать ещё</a>
-        <a href="{{ url_for('admin_users') }}" class="btn btn-ghost">К списку</a>
-      </div>
-    </div>
-  </div>
-  {% else %}
-
-  {% if error %}
-  <div class="alert alert-error">{{ error }}</div>
+  <div class="flash flash-success">Пользователь создан. Логин: <b>{{ temp_login }}</b>, временный пароль: <b>{{ temp_password }}</b></div>
   {% endif %}
-
-  <div class="card">
-    <div class="card-body">
-      <form method="POST">
-
-        <!-- Avatar picker -->
-        <div class="form-section-title">Аватар</div>
-        <div class="avatar-grid mb-2">
-          {% set emoji_map = {
-            'cat':'🐱','dog':'🐶','fox':'🦊','bear':'🐻','penguin':'🐧',
-            'owl':'🦉','tiger':'🐯','rabbit':'🐰','wolf':'🐺','panda':'🐼',
-            'frog':'🐸','lion':'🦁','koala':'🐨','duck':'🐥','dragon':'🐲'
-          } %}
-          {% for av in AVATAR_LIST %}
-          <button type="button" class="avatar-option {% if loop.first %}selected{% endif %}"
-                  data-av="{{ av }}" onclick="selectAvatar('{{ av }}')">
-            {{ emoji_map[av] }}
-          </button>
-          {% endfor %}
-        </div>
-        <input type="hidden" name="avatar" id="avatarInput" value="cat">
-
-        <div class="form-section-title">Личные данные</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">Фамилия <span class="required">*</span></label>
-            <input class="form-input" type="text" name="last_name" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Имя <span class="required">*</span></label>
-            <input class="form-input" type="text" name="first_name" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Отчество</label>
-            <input class="form-input" type="text" name="middle_name">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Пол</label>
-            <select class="form-select" name="gender">
-              <option value="">—</option>
-              <option value="M">Мужской</option>
-              <option value="F">Женский</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="form-section-title">Контакты</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">Email <span class="required">*</span></label>
-            <input class="form-input" type="email" name="email" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Мобильный</label>
-            <input class="form-input" type="tel" name="mobile" placeholder="+7 (999) 123-45-67">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Рабочий телефон</label>
-            <input class="form-input" type="tel" name="work_phone">
-          </div>
-        </div>
-
-        <div class="form-section-title">Организация</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">Должность</label>
-            <input class="form-input" type="text" name="title">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Отдел</label>
-            <input class="form-input" type="text" name="department">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Компания</label>
-            <input class="form-input" type="text" name="company">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Руководитель</label>
-            <select class="form-select" name="manager_uid">
-              <option value="">— Не указан —</option>
-              {% for u in all_users %}
-              <option value="{{ u.user_uid }}">{{ u.full_name() }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-
-        <div class="form-section-title">Доступ</div>
-        <div class="form-grid">
-          <div class="form-group">
-            <label class="form-label">Роль</label>
-            <select class="form-select" name="role">
-              <option value="user">Пользователь</option>
-              <option value="specialist">Специалист</option>
-              <option value="manager">Менеджер</option>
-              <option value="admin">Администратор</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Рабочая группа</label>
-            <select class="form-select" name="work_group_uid">
-              <option value="">— Не назначена —</option>
-              {% for wg in work_groups %}
-              <option value="{{ wg.work_group_uid }}">{{ wg.group_name }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <a href="{{ url_for('admin_users') }}" class="btn btn-ghost">Отмена</a>
-          <button type="submit" class="btn btn-primary">
-            <i data-feather="user-plus"></i> Создать пользователя
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-  {% endif %}
+  <form method="post" class="grid grid-2">
+    <input name="last_name" placeholder="Фамилия" required>
+    <input name="first_name" placeholder="Имя" required>
+    <input name="middle_name" placeholder="Отчество">
+    <input type="email" name="email" placeholder="Email" required>
+    <input name="mobile" placeholder="Мобильный">
+    <input name="work_phone" placeholder="Рабочий телефон">
+    <input name="title" placeholder="Должность">
+    <input name="department" placeholder="Отдел">
+    <input name="company" placeholder="Компания">
+    <select name="gender"><option value="">Пол</option><option value="male">Мужской</option><option value="female">Женский</option></select>
+    <select name="role">
+      <option value="user">Пользователь</option><option value="specialist">Специалист</option><option value="manager">Менеджер</option><option value="admin">Администратор</option>
+    </select>
+    <select name="work_group_uid"><option value="">Рабочая группа</option>{% for wg in work_groups %}<option value="{{ wg.work_group_uid }}">{{ wg.group_name }}</option>{% endfor %}</select>
+    <select name="manager_uid"><option value="">Руководитель</option>{% for u in all_users %}<option value="{{ u.user_uid }}">{{ u.full_name() }}</option>{% endfor %}</select>
+    <div class="actions"><button class="btn btn-primary" type="submit">Создать</button><a class="btn" href="{{ url_for('admin_users') }}">Назад</a></div>
+  </form>
 </div>
-<script>
-function selectAvatar(av) {
-  document.querySelectorAll('.avatar-option').forEach(b => b.classList.remove('selected'));
-  document.querySelector(`.avatar-option[data-av="${av}"]`).classList.add('selected');
-  document.getElementById('avatarInput').value = av;
-}
-</script>
 {% endblock %}
