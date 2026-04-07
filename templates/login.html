@@ -1,81 +1,23 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Вход — Service Desk</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <script src="https://unpkg.com/feather-icons"></script>
 </head>
-<body class="login-page">
-
+<body>
 <div class="login-wrap">
   <div class="login-card">
-    <div class="login-logo">
-      <i data-feather="headphones"></i>
-    </div>
-    <h1 class="login-title">Service Desk</h1>
-    <p class="login-subtitle">Введите логин и пароль</p>
-
-    {% if error %}
-    <div class="alert alert-error">
-      <i data-feather="alert-circle"></i>
-      {{ error }}
-    </div>
-    {% endif %}
-
-    <form method="POST" action="/login" autocomplete="off">
-      <div class="form-group">
-        <label class="form-label" for="login">Логин</label>
-        <div class="input-icon-wrap">
-          <i data-feather="user" class="input-icon"></i>
-          <input class="form-input" type="text" id="login" name="login"
-                 placeholder="Введите логин" required autofocus>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="password">Пароль</label>
-        <!-- Bug #3 fix: глазик внутри обёртки, не отдельным элементом -->
-        <div class="input-icon-wrap input-with-toggle">
-          <i data-feather="lock" class="input-icon"></i>
-          <input class="form-input" type="password" id="password" name="password"
-                 placeholder="Введите пароль" required>
-          <button type="button" class="pwd-toggle" id="pwdToggle" tabindex="-1">
-            <i data-feather="eye" id="pwdIcon"></i>
-          </button>
-        </div>
-      </div>
-
-      {% if show_forgot %}
-      <div class="alert alert-info">
-        Обратитесь к администратору для сброса пароля.
-      </div>
-      {% endif %}
-
-      <button type="submit" class="btn btn-primary btn-block btn-lg">
-        <i data-feather="log-in"></i> Войти
-      </button>
+    <h1>Service Desk</h1>
+    {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+    {% if show_forgot %}<div class="flash">Обратитесь к администратору для сброса пароля.</div>{% endif %}
+    <form method="post" action="/login" class="grid">
+      <div><label>Логин</label><input type="text" name="login" required></div>
+      <div><label>Пароль</label><input type="password" name="password" required></div>
+      <button class="btn btn-primary" type="submit">Войти</button>
     </form>
   </div>
 </div>
-
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
-<script>
-  feather.replace();
-  // Bug #3: password toggle — глазик внутри инпута
-  document.getElementById('pwdToggle').addEventListener('click', function() {
-    const inp = document.getElementById('password');
-    const ico = document.getElementById('pwdIcon');
-    if (inp.type === 'password') {
-      inp.type = 'text';
-      ico.setAttribute('data-feather', 'eye-off');
-    } else {
-      inp.type = 'password';
-      ico.setAttribute('data-feather', 'eye');
-    }
-    feather.replace();
-  });
-</script>
 </body>
 </html>

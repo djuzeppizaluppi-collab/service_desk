@@ -1,241 +1,49 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Service Desk{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <script src="https://unpkg.com/feather-icons"></script>
 </head>
 <body>
-
 {% if current_user.is_authenticated %}
 <nav class="navbar">
-  <div class="navbar-inner">
-
-    <!-- LEFT: logo + main links -->
-    <div class="navbar-left">
-      <a href="{{ url_for('home') }}" class="navbar-logo">
-        <i data-feather="headphones"></i>
-        <span>Service Desk</span>
-      </a>
-
+  <div class="container">
+    <div class="nav-left">
+      <a href="{{ url_for('home') }}">Service Desk</a>
       {% if is_specialist() %}
-      <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
-        <i data-feather="bar-chart-2"></i> Дашборд
-      </a>
-      <a href="{{ url_for('tickets_board') }}" class="nav-link {% if request.endpoint == 'tickets_board' %}active{% endif %}">
-        <i data-feather="layout"></i> Заявки
-      </a>
+      <a href="{{ url_for('tickets_board') }}" class="{% if request.endpoint == 'tickets_board' %}active{% endif %}">Заявки</a>
+      <a href="{{ url_for('dashboard') }}" class="{% if request.endpoint == 'dashboard' %}active{% endif %}">Дашборд</a>
       {% endif %}
-      <a href="{{ url_for('approvals') }}" class="nav-link {% if request.endpoint == 'approvals' %}active{% endif %}">
-        <i data-feather="check-square"></i> Согласования
-      </a>
-    </div>
-
-    <!-- RIGHT: notifications, admin menu, profile, logout -->
-    <div class="navbar-right">
-
-      <!-- Notifications bell -->
-      <div class="nav-notif" id="notifBtn">
-        <i data-feather="bell"></i>
-        {% if unread_count > 0 %}
-        <span class="notif-badge">{{ unread_count }}</span>
-        {% endif %}
-      </div>
-
-      <!-- Admin dropdown — click-based (Bug #2 fix) -->
       {% if current_user.role == 'admin' %}
-      <div class="nav-dropdown" id="adminDropdown">
-        <button class="nav-dropdown-btn" id="adminDropBtn">
-          <i data-feather="settings"></i> Админ
-          <i data-feather="chevron-down" class="chevron"></i>
-        </button>
-        <div class="nav-dropdown-menu" id="adminDropMenu">
-          <a href="{{ url_for('admin_users') }}"><i data-feather="users"></i> Пользователи</a>
-          <a href="{{ url_for('admin_categories') }}"><i data-feather="grid"></i> Каталог</a>
-          <a href="{{ url_for('admin_work_groups') }}"><i data-feather="layers"></i> Рабочие группы</a>
-        </div>
-      </div>
+      <a href="{{ url_for('admin_users') }}">Пользователи</a>
+      <a href="{{ url_for('admin_categories') }}">Каталог</a>
+      <a href="{{ url_for('admin_work_groups') }}">Группы</a>
       {% endif %}
-
-      <!-- Profile -->
-      <a href="{{ url_for('profile') }}" class="nav-profile {% if request.endpoint == 'profile' %}active{% endif %}">
-        <span class="nav-name">{{ current_user.first_name }}</span>
-      </a>
-
-      <!-- Logout (Bug #7 fix) -->
-      <a href="{{ url_for('logout') }}" class="nav-logout" title="Выйти">
-        <i data-feather="log-out"></i>
-      </a>
+    </div>
+    <div class="nav-right">
+      <a href="{{ url_for('profile') }}">{{ current_user.first_name }}</a>
+      <a href="{{ url_for('logout') }}">Выйти</a>
     </div>
   </div>
 </nav>
-
-<!-- Notifications panel -->
-<div class="notif-panel" id="notifPanel">
-  <div class="notif-panel-header">
-    <span>Уведомления</span>
-    <button id="markAllRead">Все прочитано</button>
-  </div>
-  <div class="notif-list" id="notifList">
-    <div class="notif-empty">Нет новых уведомлений</div>
-  </div>
-</div>
-<div class="notif-overlay" id="notifOverlay"></div>
-
 {% endif %}
 
-<!-- Flash messages -->
-{% with messages = get_flashed_messages(with_categories=true) %}
-  {% if messages %}
-  <div class="flash-container">
-    {% for category, message in messages %}
-    <div class="flash flash-{{ category }}">
-      <span>{{ message }}</span>
-      <button onclick="this.parentElement.remove()"><i data-feather="x"></i></button>
+<div class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-wrap">
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-{% endwith %}
+    {% endif %}
+  {% endwith %}
 
-<!-- Main content -->
-<main class="main-content">
   {% block content %}{% endblock %}
-</main>
-
-<!-- Ticket modal -->
-<div class="modal-overlay" id="ticketModalOverlay" style="display:none">
-  <div class="modal modal-ticket" id="ticketModal">
-    <div class="modal-header">
-      <div>
-        <span class="modal-ticket-num" id="modalTicketNum"></span>
-        <span class="modal-ticket-status" id="modalTicketStatus"></span>
-        <span class="modal-ticket-priority" id="modalTicketPriority"></span>
-      </div>
-      <button class="modal-close" id="ticketModalClose"><i data-feather="x"></i></button>
-    </div>
-    <div class="modal-body-split">
-      <!-- LEFT -->
-      <div class="modal-main">
-        <h2 class="modal-title" id="modalTitle"></h2>
-        <p class="modal-meta" id="modalMeta"></p>
-        <div class="modal-description" id="modalDescription"></div>
-
-        <!-- Approvals -->
-        <div id="modalApprovalsWrap" style="display:none">
-          <h4 class="modal-section-label">Согласование</h4>
-          <div id="modalApprovals"></div>
-          <div id="myApprovalActions" style="display:none" class="approval-actions">
-            <textarea id="approvalComment" placeholder="Комментарий (необязательно)"></textarea>
-            <div class="approval-btns">
-              <button class="btn btn-success" id="btnApprove">Согласовать</button>
-              <button class="btn btn-danger" id="btnReject">Отклонить</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Attachments -->
-        <div class="modal-section">
-          <h4 class="modal-section-label">Вложения <span id="attachCount"></span></h4>
-          <div id="modalAttachments"></div>
-          <label class="btn btn-outline btn-sm attach-btn">
-            <i data-feather="paperclip"></i> Прикрепить файл
-            <input type="file" id="attachFileInput" multiple style="display:none">
-          </label>
-        </div>
-
-        <!-- Comments -->
-        <div class="modal-section">
-          <h4 class="modal-section-label">Комментарии</h4>
-          <div id="modalComments"></div>
-          <div class="comment-form">
-            <textarea id="commentText" placeholder="Написать комментарий..."></textarea>
-            <div class="comment-form-footer">
-              {% if is_specialist() %}
-              <label class="checkbox-label">
-                <input type="checkbox" id="commentInternal">
-                <span>Внутренний</span>
-              </label>
-              {% endif %}
-              <button class="btn btn-primary btn-sm" id="btnComment">Отправить</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- RIGHT: sidebar -->
-      <div class="modal-sidebar">
-        <div class="sidebar-section">
-          <div class="sidebar-row">
-            <span class="sidebar-label">Статус</span>
-            <div id="sidebarStatusWrap"></div>
-          </div>
-          <div class="sidebar-row">
-            <span class="sidebar-label">Приоритет</span>
-            <span id="sidebarPriority"></span>
-          </div>
-          <div class="sidebar-row">
-            <span class="sidebar-label">Дедлайн</span>
-            <span id="sidebarDeadline"></span>
-          </div>
-          <div class="sidebar-row">
-            <span class="sidebar-label">Категория</span>
-            <span id="sidebarCatalog"></span>
-          </div>
-          <div class="sidebar-row">
-            <span class="sidebar-label">Инициатор</span>
-            <a id="sidebarRequester" href="#"></a>
-          </div>
-          <div class="sidebar-row">
-            <span class="sidebar-label">Исполнитель</span>
-            <span id="sidebarPerformer"></span>
-          </div>
-        </div>
-
-        {% if is_specialist() %}
-        <div class="sidebar-section" id="sidebarActions">
-          <h4 class="sidebar-section-title">Действия</h4>
-          <button class="btn btn-primary btn-block" id="btnTake" style="display:none">
-            <i data-feather="user-check"></i> Взять в работу
-          </button>
-          <div id="assignWrap" style="display:none">
-            <select id="assignSelect" class="form-select">
-              <option value="">— Не назначено —</option>
-            </select>
-            <button class="btn btn-outline btn-sm mt-1" id="btnAssign">Назначить</button>
-          </div>
-          <div id="statusWrap" style="display:none">
-            <select id="statusSelect" class="form-select">
-              <option value="in_progress">В работе</option>
-              <option value="on_hold">Приостановлено</option>
-              <option value="resolved">Решена</option>
-              <option value="closed">Закрыта</option>
-              <option value="cancelled">Отменено</option>
-            </select>
-            <button class="btn btn-outline btn-sm mt-1" id="btnStatus">Изменить статус</button>
-          </div>
-          <button class="btn btn-danger btn-sm mt-2" id="btnDelete" style="display:none">
-            <i data-feather="trash-2"></i> Удалить
-          </button>
-        </div>
-        {% endif %}
-
-        <!-- History -->
-        <div class="sidebar-section">
-          <h4 class="sidebar-section-title" id="historyToggle" style="cursor:pointer">
-            История <i data-feather="chevron-down"></i>
-          </h4>
-          <div id="modalHistory" style="display:none"></div>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
-
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-<script>feather.replace();</script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

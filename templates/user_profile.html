@@ -1,66 +1,14 @@
 {% extends "base.html" %}
-{% block title %}{{ user.full_name() }} — Service Desk{% endblock %}
+{% block title %}Профиль пользователя{% endblock %}
 {% block content %}
-
-<div class="page-center">
-  <div class="card user-profile-card">
-    <div class="user-profile-top">
-      <div class="user-profile-info">
-        <h2>{{ user.full_name() }}</h2>
-        <div class="user-role-badge role-{{ user.role }}">{{ user.role|role_label }}</div>
-        {% if user.title %}<p class="user-title">{{ user.title }}</p>{% endif %}
-      </div>
-    </div>
-
-    <div class="user-profile-grid">
-      {% if user.email %}
-      <div class="info-row">
-        <i data-feather="mail"></i>
-        <a href="mailto:{{ user.email }}">{{ user.email }}</a>
-      </div>
-      {% endif %}
-      {% if user.mobile or user.work_phone %}
-      <div class="info-row">
-        <i data-feather="phone"></i>
-        <span>{{ user.mobile or user.work_phone }}</span>
-      </div>
-      {% endif %}
-      {% if user.department %}
-      <div class="info-row">
-        <i data-feather="layers"></i>
-        <span>{{ user.department }}</span>
-      </div>
-      {% endif %}
-      {% if user.company %}
-      <div class="info-row">
-        <i data-feather="home"></i>
-        <span>{{ user.company }}</span>
-      </div>
-      {% endif %}
-      {% if manager %}
-      <div class="info-row">
-        <i data-feather="user"></i>
-        <span>Руководитель:
-          <a href="/user/{{ manager.user_uid }}">{{ manager.full_name() }}</a>
-        </span>
-      </div>
-      {% endif %}
-    </div>
-
-    {% if work_groups %}
-    <div class="profile-wg-list">
-      {% for wg in work_groups %}
-      <span class="wg-tag">{{ wg.group_name }}</span>
-      {% endfor %}
-    </div>
-    {% endif %}
-
-    <div class="user-profile-actions">
-      <button onclick="history.back()" class="btn btn-ghost">
-        <i data-feather="arrow-left"></i> Назад
-      </button>
-    </div>
-  </div>
+<div class="card">
+  <h2>{{ user.full_name() }}</h2>
+  <p class="muted">{{ user.role|role_label }}</p>
+  <p>Email: {{ user.email or '—' }}</p>
+  <p>Телефон: {{ user.mobile or user.work_phone or '—' }}</p>
+  <p>Департамент: {{ user.department or '—' }}</p>
+  {% if manager %}<p>Руководитель: <a href="/user/{{ manager.user_uid }}">{{ manager.full_name() }}</a></p>{% endif %}
+  {% if work_groups %}<p>Группы: {% for wg in work_groups %}<span class="badge">{{ wg.group_name }}</span> {% endfor %}</p>{% endif %}
+  <button class="btn" onclick="history.back()">Назад</button>
 </div>
-
 {% endblock %}

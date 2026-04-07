@@ -92,18 +92,6 @@ class User(UserMixin, db.Model):
     def all_work_groups(self):
         return [l.work_group for l in self.work_group_links.order_by(UserWorkGroup.assigned_date).all()]
 
-    def avatar_emoji(self):
-        return ''
-
-
-    def avatar_emoji(self):
-        return ''
-
-
-    def avatar_emoji(self):
-        return ''
-
-
       
 # ---------------------------------------------------------------------------
 # sm.passwords
