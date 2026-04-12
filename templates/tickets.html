@@ -17,7 +17,7 @@
     <tr><th>Номер</th><th>Тема</th><th>Категория</th><th>Статус</th><th>Приоритет</th><th>Исполнитель</th><th>Создана</th></tr>
     {% for t in tickets %}
     <tr>
-      <td>{{ t.ticket_number }}</td>
+      <td><a href="/ticket/{{ t.ticket_uid }}">{{ t.ticket_number }}</a></td>
       <td>{{ t.summary }}</td>
       <td>{{ t.catalog.catalog_name if t.catalog else '—' }}</td>
       <td>{{ t.status|status_label }}</td>

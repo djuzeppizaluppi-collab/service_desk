@@ -793,6 +793,41 @@ def tickets_board():
 # TICKET API — CREATE
 # ============================================================
 
+@app.route('/tickets/new', methods=['POST'])
+@login_required
+def create_ticket_form():
+    catalog_uid = request.form.get('catalog_uid', '').strip()
+    summary = request.form.get('summary', '').strip()
+    description = request.form.get('description', '').strip()
+    if not catalog_uid or not summary or not description:
+        flash('Заполните все поля', 'error')
+        return redirect('/')
+    catalog = ServiceCatalog.query.get(catalog_uid)
+    if not catalog or not catalog.is_active or catalog.catalog_type == 'category':
+        flash('Услуга не найдена', 'error')
+        return redirect('/')
+
+    ticket = Ticket(
+        ticket_number=generate_ticket_number(),
+        catalog_uid=catalog_uid,
+        summary=summary,
+        description=description,
+        requester_uid=current_user.user_uid,
+        recipient_uid=current_user.user_uid,
+        status='new',
+        priority=catalog.priority or 'medium',
+        deadline_at=compute_deadline(catalog),
+        created_by=current_user.user_uid,
+        updated_by=current_user.user_uid,
+    )
+    db.session.add(ticket)
+    db.session.flush()
+    add_ticket_history(ticket.ticket_uid, 'status', None, 'new', current_user.user_uid)
+    db.session.commit()
+    flash(f'Заявка {ticket.ticket_number} создана', 'success')
+    return redirect(f'/ticket/{ticket.ticket_uid}')
+
+
 @app.route('/api/tickets', methods=['POST'])
 @login_required
 def create_ticket():
@@ -850,6 +885,23 @@ def create_ticket():
 # ============================================================
 # TICKET API — GET
 # ============================================================
+
+@app.route('/ticket/<ticket_uid>')
+@login_required
+def ticket_detail(ticket_uid):
+    ticket = Ticket.query.get_or_404(ticket_uid)
+    if not _can_view_ticket(ticket):
+        flash('Доступ запрещён', 'error')
+        return redirect('/')
+    specialists = User.query.join(UserRole).filter(
+        UserRole.role.in_(['specialist', 'manager', 'admin'])
+    ).all() if current_user.role in ('admin', 'manager') else []
+    comments = ticket.param_values.filter(
+        TicketParamValue.param_type == 'comment'
+    ).order_by(TicketParamValue.create_date).all()
+    return render_template('ticket_detail.html',
+                           ticket=ticket, specialists=specialists, comments=comments)
+
 
 @app.route('/api/tickets/<ticket_uid>', methods=['GET'])
 @login_required
@@ -938,6 +990,31 @@ def get_ticket(ticket_uid):
 # ============================================================
 # TICKET API — UPDATE
 # ============================================================
+
+@app.route('/ticket/<ticket_uid>/update', methods=['POST'])
+@login_required
+def update_ticket_form(ticket_uid):
+    ticket = Ticket.query.get_or_404(ticket_uid)
+    if not _can_edit_ticket(ticket):
+        flash('Доступ запрещён', 'error')
+        return redirect(f'/ticket/{ticket_uid}')
+    new_status = request.form.get('status')
+    new_performer = request.form.get('performer_uid') or None
+    now = datetime.utcnow()
+    if new_status and new_status != ticket.status:
+        add_ticket_history(ticket_uid, 'status', ticket.status, new_status, current_user.user_uid)
+        ticket.status = new_status
+        if new_status == 'resolved':
+            ticket.resolved_at = now
+    if 'performer_uid' in request.form and new_performer != ticket.performer_uid:
+        add_ticket_history(ticket_uid, 'performer', ticket.performer_uid, new_performer, current_user.user_uid)
+        ticket.performer_uid = new_performer
+    ticket.updated_at = now
+    ticket.updated_by = current_user.user_uid
+    db.session.commit()
+    flash('Заявка обновлена', 'success')
+    return redirect(f'/ticket/{ticket_uid}')
+
 
 @app.route('/api/tickets/<ticket_uid>/update', methods=['POST'])
 @login_required
@@ -1372,14 +1449,22 @@ def edit_user(user_uid):
 @login_required
 def delete_user(user_uid):
     if current_user.role != 'admin':
-        return jsonify({'error': 'Доступ запрещён'}), 403
+        if request.is_json:
+            return jsonify({'error': 'Доступ запрещён'}), 403
+        return 'Доступ запрещён', 403
     user = User.query.get_or_404(user_uid)
     if user.user_uid == current_user.user_uid:
-        return jsonify({'error': 'Нельзя деактивировать себя'}), 400
+        if request.is_json:
+            return jsonify({'error': 'Нельзя деактивировать себя'}), 400
+        flash('Нельзя деактивировать себя', 'error')
+        return redirect('/admin/users')
     user.is_deactivated = True
     user.update_date = datetime.utcnow()
     db.session.commit()
-    return jsonify({'success': True})
+    if request.is_json:
+        return jsonify({'success': True})
+    flash('Пользователь деактивирован', 'success')
+    return redirect('/admin/users')
 
 
 @app.route('/admin/reset-password/<user_uid>', methods=['POST'])
@@ -1497,27 +1582,36 @@ def toggle_category(cat_uid):
 @login_required
 def delete_category(cat_uid):
     if current_user.role != 'admin':
-        return jsonify({'error': 'Доступ запрещён'}), 403
+        if request.is_json:
+            return jsonify({'error': 'Доступ запрещён'}), 403
+        return 'Доступ запрещён', 403
     cat = ServiceCatalog.query.get_or_404(cat_uid)
     ticket_count = Ticket.query.filter_by(catalog_uid=cat_uid).count()
     if ticket_count > 0:
-        return jsonify({
-            'error': f'Нельзя удалить: к этой категории привязано {ticket_count} заявок. '
-                     f'Сначала скройте её (глазик), чтобы запретить новые заявки.'
-        }), 400
+        msg = (f'Нельзя удалить: к этой категории привязано {ticket_count} заявок. '
+               f'Сначала скройте её (глазик), чтобы запретить новые заявки.')
+        if request.is_json:
+            return jsonify({'error': msg}), 400
+        flash(msg, 'error')
+        return redirect('/admin/categories')
     # Also delete child services if this is a top-level category
     for child in cat.children.all():
         if Ticket.query.filter_by(catalog_uid=child.catalog_uid).count() == 0:
             db.session.delete(child)
         else:
-            return jsonify({
-                'error': f'Нельзя удалить: дочерняя услуга «{child.catalog_name}» имеет привязанные заявки.'
-            }), 400
+            msg = f'Нельзя удалить: дочерняя услуга «{child.catalog_name}» имеет привязанные заявки.'
+            if request.is_json:
+                return jsonify({'error': msg}), 400
+            flash(msg, 'error')
+            return redirect('/admin/categories')
     audit(current_user.user_uid, 'delete_category', 'service_catalog', cat_uid,
           f'Удалена категория {cat.catalog_name}', request.remote_addr)
     db.session.delete(cat)
     db.session.commit()
-    return jsonify({'success': True})
+    if request.is_json:
+        return jsonify({'success': True})
+    flash('Категория деактивирована/удалена', 'success')
+    return redirect('/admin/categories')
 
 
 # ============================================================
@@ -1537,33 +1631,52 @@ def admin_work_groups():
 @login_required
 def create_work_group():
     if current_user.role != 'admin':
-        return jsonify({'error': 'Доступ запрещён'}), 403
-    data = request.get_json() or {}
+        if request.is_json:
+            return jsonify({'error': 'Доступ запрещён'}), 403
+        return 'Доступ запрещён', 403
+    data = request.get_json() if request.is_json else request.form
     name = (data.get('group_name') or '').strip()
     desc = (data.get('group_description') or '').strip() or None
     if not name:
-        return jsonify({'error': 'Название обязательно'}), 400
+        if request.is_json:
+            return jsonify({'error': 'Название обязательно'}), 400
+        flash('Название обязательно', 'error')
+        return redirect('/admin/work-groups')
     if WorkGroup.query.filter_by(group_name=name).first():
-        return jsonify({'error': 'Группа уже существует'}), 400
+        if request.is_json:
+            return jsonify({'error': 'Группа уже существует'}), 400
+        flash('Группа уже существует', 'error')
+        return redirect('/admin/work-groups')
     wg = WorkGroup(group_name=name, group_description=desc, create_by=current_user.user_uid)
     db.session.add(wg)
     db.session.commit()
-    return jsonify({'success': True, 'work_group_uid': wg.work_group_uid})
+    if request.is_json:
+        return jsonify({'success': True, 'work_group_uid': wg.work_group_uid})
+    flash('Рабочая группа создана', 'success')
+    return redirect('/admin/work-groups')
 
 
 @app.route('/admin/delete-work-group/<wg_uid>', methods=['POST'])
 @login_required
 def delete_work_group(wg_uid):
     if current_user.role != 'admin':
-        return jsonify({'error': 'Доступ запрещён'}), 403
+        if request.is_json:
+            return jsonify({'error': 'Доступ запрещён'}), 403
+        return 'Доступ запрещён', 403
     wg = WorkGroup.query.get_or_404(wg_uid)
     has_catalog = ServiceCatalog.query.filter_by(work_group_uid=wg_uid).first()
     if has_catalog:
-        return jsonify({'error': 'Нельзя удалить группу: есть связанные услуги'}), 400
+        if request.is_json:
+            return jsonify({'error': 'Нельзя удалить группу: есть связанные услуги'}), 400
+        flash('Нельзя удалить группу: есть связанные услуги', 'error')
+        return redirect('/admin/work-groups')
     UserWorkGroup.query.filter_by(work_group_uid=wg_uid).delete()
     db.session.delete(wg)
     db.session.commit()
-    return jsonify({'success': True})
+    if request.is_json:
+        return jsonify({'success': True})
+    flash('Рабочая группа удалена', 'success')
+    return redirect('/admin/work-groups')
 
 
 # ============================================================

@@ -413,7 +413,7 @@ import re
 import random
 import string
 from datetime import timedelta
-from sqlalchemy import text
+from sqlalchemy import text, func
 from werkzeug.security import generate_password_hash, check_password_hash
 
 _RUS = list('АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЫЭЮЯЬЪ')
@@ -438,21 +438,6 @@ def translit(text_ru: str) -> str:
 # LOGIN GENERATION  (mirrors sm.generate_login)
 # ---------------------------------------------------------------------------
 def generate_login(last_name: str, first_name: str, middle_name: str = None) -> str:
-    """
-    Try to call sm.generate_login() in Postgres first.
-    Falls back to Python implementation if the function is not available.
-    """
-    try:
-        row = db.session.execute(
-            text("SELECT sm.generate_login(:ln, :fn, :mn)"),
-            {'ln': last_name, 'fn': first_name, 'mn': middle_name}
-        ).scalar()
-        if row and not row.startswith('ERROR'):
-            return row
-    except Exception:
-        db.session.rollback()
-
-    # Python fallback
     base_ln = translit(last_name)[:8]
     base_fn = translit(first_name)[:1]
     base_mn = translit(middle_name)[:1] if middle_name else ''
@@ -469,17 +454,7 @@ def generate_login(last_name: str, first_name: str, middle_name: str = None) -> 
 # PASSWORD GENERATION  (mirrors sm.generate_password)
 # ---------------------------------------------------------------------------
 def generate_password() -> str:
-    """
-    Try sm.generate_password() first; fall back to Python.
-    """
-    try:
-        row = db.session.execute(text("SELECT sm.generate_password()")).scalar()
-        if row:
-            return row
-    except Exception:
-        db.session.rollback()
-
-    # Python fallback: guaranteed to have upper, lower, digit, special
+    """Generate a strong temporary password."""
     chars = string.ascii_letters + string.digits + '!@#$%&*'
     parts = [
         random.choice(string.ascii_uppercase),
@@ -524,8 +499,7 @@ def normalize_gender(gender: str):
 # ---------------------------------------------------------------------------
 def generate_ticket_number() -> str:
     """Generate a sequential ticket number like SD-20240001."""
-    from models import Ticket
-    count = db.session.execute(text("SELECT COUNT(*) FROM sm.tickets")).scalar() or 0
+    count = db.session.query(func.count(Ticket.ticket_uid)).scalar() or 0
     year = datetime.utcnow().year
     return f"SD-{year}-{(count + 1):04d}"
 
@@ -538,43 +512,11 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
                    role='user', work_group_uid=None, manager_uid=None,
                    creator_uid=None, avatar='cat') -> tuple:
     """
-    Creates a user.  Tries sm.create_user() first; falls back to manual INSERT.
+    Creates a user.
 
     Returns (user_name, temp_password).
     """
     temp_password = generate_password()
-
-    try:
-        # Try the stored procedure
-        row = db.session.execute(
-            text("SELECT sm.create_user(:ln,:fn,:mn,:email,:mob,:wp,:gen,:title,:dept,:comp)"),
-            {
-                'ln': last_name, 'fn': first_name, 'mn': middle_name,
-                'email': email, 'mob': mobile, 'wp': work_phone,
-                'gen': gender, 'title': title, 'dept': department, 'comp': company,
-            }
-        ).scalar()
-
-        if row and not str(row).startswith('ERROR'):
-            # sm.create_user returned the login and already inserted into sm.passwords
-            user_name = row
-            user = User.query.filter_by(user_name=user_name).first()
-            if user:
-                # Overwrite the Postgres-generated hash with Werkzeug hash
-                _set_password_hash(user.user_uid, temp_password)
-                _ensure_role(user.user_uid, role, creator_uid)
-                _ensure_work_group(user.user_uid, work_group_uid)
-                user.manager_uid = manager_uid
-                user.avatar = avatar or user.avatar or 'cat'
-                db.session.commit()
-                return user_name, temp_password
-
-    except Exception as e:
-        db.session.rollback()
-        # Fall through to Python path
-        print(f"[db_functions] sm.create_user failed ({e}), using Python fallback")
-
-    # ---- Python fallback ----
     user_name = generate_login(last_name, first_name, middle_name)
     uid = gen_uuid()
     sys_uid = creator_uid or uid   # self-reference for system bootstrap
@@ -614,7 +556,6 @@ def create_user_db(last_name, first_name, middle_name, email, mobile,
 def reset_password_db(user_name: str):
     """
     Generates a new temp password and stores its Werkzeug hash.
-    Tries sm.reset_password() first; falls back to Python.
     Returns the plain-text temporary password.
     """
     user = User.query.filter_by(user_name=user_name).first()
@@ -622,16 +563,6 @@ def reset_password_db(user_name: str):
         return None
 
     temp_password = generate_password()
-
-    try:
-        db.session.execute(
-            text("SELECT sm.reset_password(:uname)"),
-            {'uname': user_name}
-        )
-        # The PG function stores a bcrypt hash — but we need Werkzeug hash for Flask.
-        # Overwrite with Werkzeug hash so check_password_hash() works.
-    except Exception:
-        db.session.rollback()
 
     _set_password_hash(user.user_uid, temp_password)
 

@@ -8,12 +8,22 @@
     {% for cat in categories %}
     <tr>
       <td>{{ cat.catalog_name }}</td><td>{{ cat.catalog_type }}</td><td>{{ cat.work_group.group_name if cat.work_group else '—' }}</td><td>{{ cat.priority|priority_label }}</td><td>{{ 'Да' if cat.is_active else 'Нет' }}</td>
-      <td><a class="btn" href="{{ url_for('edit_category', cat_uid=cat.catalog_uid) }}">Редактировать</a> <button class="btn btn-danger" onclick="deleteCategory('{{ cat.catalog_uid }}')">Деактивировать</button></td>
+      <td>
+        <a class="btn" href="{{ url_for('edit_category', cat_uid=cat.catalog_uid) }}">Редактировать</a>
+        <form method="POST" action="/admin/delete-category/{{ cat.catalog_uid }}" onsubmit="return confirm('Деактивировать категорию/услугу?')" style="display:inline-block;">
+          <button class="btn btn-danger" type="submit">Деактивировать</button>
+        </form>
+      </td>
     </tr>
       {% for svc in cat._services %}
       <tr>
         <td>— {{ svc.catalog_name }}</td><td>{{ svc.catalog_type }}</td><td>{{ svc.work_group.group_name if svc.work_group else '—' }}</td><td>{{ svc.priority|priority_label }}</td><td>{{ 'Да' if svc.is_active else 'Нет' }}</td>
-        <td><a class="btn" href="{{ url_for('edit_category', cat_uid=svc.catalog_uid) }}">Редактировать</a> <button class="btn btn-danger" onclick="deleteCategory('{{ svc.catalog_uid }}')">Деактивировать</button></td>
+        <td>
+          <a class="btn" href="{{ url_for('edit_category', cat_uid=svc.catalog_uid) }}">Редактировать</a>
+          <form method="POST" action="/admin/delete-category/{{ svc.catalog_uid }}" onsubmit="return confirm('Деактивировать категорию/услугу?')" style="display:inline-block;">
+            <button class="btn btn-danger" type="submit">Деактивировать</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     {% endfor %}
