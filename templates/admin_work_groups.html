@@ -3,17 +3,29 @@
 {% block content %}
 <div class="card">
   <h2>Рабочие группы</h2>
-  <div class="grid grid-2">
-    <input id="wg_name" placeholder="Название группы">
-    <input id="wg_desc" placeholder="Описание">
-  </div>
-  <div class="actions" style="margin-top:8px;"><button class="btn btn-primary" onclick="createWorkGroup()">Добавить</button></div>
+  <form method="POST" action="/admin/create-work-group">
+    <div class="grid grid-2">
+      <input name="group_name" placeholder="Название группы" required>
+      <input name="group_description" placeholder="Описание">
+    </div>
+    <div class="actions" style="margin-top:8px;"><button class="btn btn-primary" type="submit">Добавить</button></div>
+  </form>
 </div>
 <div class="card">
   <table class="table">
     <tr><th>Название</th><th>Описание</th><th>Действия</th></tr>
     {% for wg in groups %}
-    <tr><td>{{ wg.group_name }}</td><td>{{ wg.group_description or '—' }}</td><td>{% if wg.isactive %}<button class="btn btn-danger" onclick="deleteWorkGroup('{{ wg.work_group_uid }}')">Удалить</button>{% endif %}</td></tr>
+    <tr>
+      <td>{{ wg.group_name }}</td>
+      <td>{{ wg.group_description or '—' }}</td>
+      <td>
+        {% if wg.isactive %}
+        <form method="POST" action="/admin/delete-work-group/{{ wg.work_group_uid }}" onsubmit="return confirm('Удалить рабочую группу?')">
+          <button class="btn btn-danger" type="submit">Удалить</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
     {% endfor %}
   </table>
 </div>

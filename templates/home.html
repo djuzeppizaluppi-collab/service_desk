@@ -2,28 +2,39 @@
 {% block title %}Главная{% endblock %}
 {% block content %}
 <div class="card">
-  <h2>Создать заявку</h2>
-  <div class="grid grid-2">
-    <div>
-      <label>Услуга</label>
-      <select id="new_catalog_uid">
-        {% for cat in categories %}
-          {% for svc in cat._children %}
-          <option value="{{ svc.catalog_uid }}">{{ cat.catalog_name }} / {{ svc.catalog_name }}</option>
-          {% endfor %}
-        {% endfor %}
-      </select>
-    </div>
-    <div><label>Тема</label><input id="new_summary" type="text" placeholder="Кратко опишите проблему"></div>
+  <div class="inline" style="justify-content:space-between;">
+    <h2>Создание заявки</h2>
+    <button class="btn btn-primary" onclick="openModal('create-modal')">Новая заявка</button>
   </div>
-  <div style="margin-top:10px;"><label>Описание</label><textarea id="new_description" rows="4"></textarea></div>
-  <div class="actions" style="margin-top:10px;"><button class="btn btn-primary" onclick="createTicket()">Отправить</button></div>
+</div>
+
+<div id="create-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);align-items:center;justify-content:center;padding:16px;z-index:50;">
+  <div class="card" style="width:100%;max-width:700px;">
+    <div class="inline" style="justify-content:space-between;"><h3>Новая заявка</h3><button class="btn" type="button" onclick="closeModal('create-modal')">Закрыть</button></div>
+    <form method="POST" action="/tickets/new">
+      <div class="grid grid-2">
+        <div>
+          <label>Услуга</label>
+          <select name="catalog_uid" required>
+            {% for cat in categories %}
+              {% for svc in cat._children %}
+              <option value="{{ svc.catalog_uid }}">{{ cat.catalog_name }} / {{ svc.catalog_name }}</option>
+              {% endfor %}
+            {% endfor %}
+          </select>
+        </div>
+        <div><label>Тема</label><input name="summary" type="text" placeholder="Кратко опишите проблему" required></div>
+      </div>
+      <div style="margin-top:10px;"><label>Описание</label><textarea name="description" rows="4" required></textarea></div>
+      <div class="actions" style="margin-top:10px;"><button class="btn btn-primary" type="submit">Отправить</button></div>
+    </form>
+  </div>
 </div>
 
 <div class="card">
   <h3>Каталог услуг</h3>
   {% for cat in categories %}
-    <p><strong>{{ cat.catalog_name }}</strong>: 
+    <p><strong>{{ cat.catalog_name }}</strong>:
     {% for svc in cat._children %}
       <span class="badge">{{ svc.catalog_name }}</span>
     {% else %}
@@ -37,7 +48,7 @@
   <h3>Мои заявки</h3>
   <table class="table">
     <tr><th>Номер</th><th>Тема</th><th>Статус</th><th>Создана</th></tr>
-    {% for t in my_tickets %}<tr><td>{{ t.ticket_number }}</td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td><td>{{ t.created_at|datefmt }}</td></tr>{% endfor %}
+    {% for t in my_tickets %}<tr><td><a href="/ticket/{{ t.ticket_uid }}">{{ t.ticket_number }}</a></td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td><td>{{ t.created_at|datefmt }}</td></tr>{% endfor %}
   </table>
 </div>
 {% endif %}
@@ -47,7 +58,7 @@
   <h3>Результаты поиска: {{ q }}</h3>
   <table class="table">
     <tr><th>Номер</th><th>Тема</th><th>Статус</th></tr>
-    {% for t in search_results %}<tr><td>{{ t.ticket_number }}</td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td></tr>{% endfor %}
+    {% for t in search_results %}<tr><td><a href="/ticket/{{ t.ticket_uid }}">{{ t.ticket_number }}</a></td><td>{{ t.summary }}</td><td>{{ t.status|status_label }}</td></tr>{% endfor %}
   </table>
 </div>
 {% endif %}
