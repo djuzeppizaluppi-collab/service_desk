@@ -265,8 +265,7 @@ def init_db():
     # Lightweight compatibility migration for older databases.
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.users
-            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL,
-            ADD COLUMN IF NOT EXISTS avatar varchar(32) NULL DEFAULT 'cat'
+            ADD COLUMN IF NOT EXISTS manager_uid uuid NULL
     """))
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.service_catalog
@@ -1180,6 +1179,34 @@ def add_comment(ticket_uid):
             'created_at': datetime.utcnow().strftime('%d.%m.%Y %H:%M'),
         }
     })
+
+
+@app.route('/ticket/<ticket_uid>/add_comment', methods=['POST'])
+@login_required
+def add_comment_form(ticket_uid):
+    ticket = Ticket.query.get_or_404(ticket_uid)
+    if not _can_view_ticket(ticket):
+        flash('Доступ запрещён', 'error')
+        return redirect(f'/ticket/{ticket_uid}')
+    text = (request.form.get('text') or '').strip()
+    if not text:
+        flash('Комментарий не может быть пустым', 'error')
+        return redirect(f'/ticket/{ticket_uid}')
+    db.session.add(TicketParamValue(
+        ticket_uid=ticket_uid,
+        param_name='comment',
+        param_value=text,
+        param_type='comment',
+        author_uid=current_user.user_uid,
+    ))
+    ticket.updated_at = datetime.utcnow()
+    ticket.updated_by = current_user.user_uid
+    notify_ticket_update(ticket,
+                         f'Новый комментарий к заявке {ticket.ticket_number}',
+                         exclude_uid=current_user.user_uid)
+    db.session.commit()
+    flash('Комментарий добавлен', 'success')
+    return redirect(f'/ticket/{ticket_uid}')
 
 
 # ============================================================

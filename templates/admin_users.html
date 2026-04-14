@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Пользователи{% endblock %}
 {% block content %}
+<style>
+  .admin-user-action-btn {
+    min-width: 150px;
+    text-align: center;
+  }
+
+  .admin-user-action-form {
+    margin: 0;
+  }
+</style>
 <div class="card">
   <div class="inline" style="justify-content:space-between;"><h2>Пользователи</h2><a class="btn btn-primary" href="{{ url_for('create_user') }}">Создать пользователя</a></div>
   <table class="table">
@@ -15,11 +25,11 @@
       <td>{{ wgs[0].group_name if wgs else '—' }}</td>
       <td>{{ 'Деактивирован' if u.is_deactivated else 'Активен' }}</td>
       <td class="actions">
-        <a class="btn" href="{{ url_for('edit_user', user_uid=u.user_uid) }}">Редактировать</a>
-        <button class="btn" type="button" onclick="resetPassword('{{ u.user_uid }}')">Сброс пароля</button>
+        <a class="btn admin-user-action-btn" href="{{ url_for('edit_user', user_uid=u.user_uid) }}">Редактировать</a>
+        <button class="btn admin-user-action-btn" type="button" onclick="resetPassword('{{ u.user_uid }}')">Сброс пароля</button>
         {% if u.user_uid != current_user.user_uid %}
-          <form method="POST" action="/admin/delete-user/{{ u.user_uid }}" onsubmit="return confirm('Деактивировать?')">
-            <button class="btn btn-danger" type="submit">Деактивировать</button>
+          <form class="admin-user-action-form" method="POST" action="/admin/delete-user/{{ u.user_uid }}" onsubmit="return confirm('Деактивировать?')">
+            <button class="btn btn-danger admin-user-action-btn" type="submit">Деактивировать</button>
           </form>
         {% endif %}
       </td>

@@ -20,6 +20,14 @@
   {% else %}
     <p class="muted">Комментариев пока нет.</p>
   {% endfor %}
+
+  <form method="POST" action="/ticket/{{ ticket.ticket_uid }}/add_comment" style="margin-top:12px;">
+    <label>Добавить комментарий</label>
+    <textarea name="text" rows="3" placeholder="Напишите комментарий..." required style="width:100%;"></textarea>
+    <div class="actions" style="margin-top:8px;">
+      <button class="btn btn-primary" type="submit">Отправить</button>
+    </div>
+  </form>
 </div>
 
 {% if current_user.role in ('specialist', 'manager', 'admin') %}
