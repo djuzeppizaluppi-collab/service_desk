@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS sm.users (
     department      varchar(255) NULL,
     company         varchar(255) NULL,
     manager_uid     uuid NULL,
-    avatar          varchar(32) DEFAULT 'cat' NULL,
     work_status     varchar(20)  NULL,
     is_vip          bool         DEFAULT false NULL,
     is_deactivated  bool         DEFAULT false NULL,
