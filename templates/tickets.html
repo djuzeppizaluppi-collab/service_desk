@@ -2,32 +2,36 @@
 {% block title %}Заявки{% endblock %}
 {% block content %}
 <div class="card">
-  <h2>Фильтры</h2>
-  <form class="grid grid-2" method="get" action="/tickets">
-    <input type="hidden" name="view" value="{{ view_mode }}">
-    <select name="status"><option value="">Все статусы</option><option value="new">Новая</option><option value="in_progress">В работе</option><option value="resolved">Решена</option></select>
-    <select name="priority"><option value="">Все приоритеты</option><option value="critical">Критический</option><option value="high">Высокий</option><option value="medium">Средний</option><option value="low">Низкий</option></select>
-    <button class="btn">Применить</button>
-  </form>
+  <h2>Очередь задач</h2>
+  <div id="filters">
+    <select id="filter-select">
+      <option value="all">All tasks</option>
+      <option value="my">My tasks</option>
+      <option value="overdue">Overdue</option>
+    </select>
+    <select id="user-select">
+      <option value="">— by performer —</option>
+    </select>
+  </div>
+  <table id="queue" class="table">
+    <thead>
+    <tr>
+      <th>#</th><th>Summary</th><th>Status</th>
+      <th>Performer</th><th>Deadline</th><th>Priority</th><th>Actions</th>
+    </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 </div>
 
-<div class="card">
-  <h2>Список заявок</h2>
-  <table class="table">
-    <tr><th>Номер</th><th>Тема</th><th>Категория</th><th>Статус</th><th>Приоритет</th><th>Исполнитель</th><th>Создана</th></tr>
-    {% for t in tickets %}
-    <tr>
-      <td><a href="/ticket/{{ t.ticket_uid }}">{{ t.ticket_number }}</a></td>
-      <td>{{ t.summary }}</td>
-      <td>{{ t.catalog.catalog_name if t.catalog else '—' }}</td>
-      <td>{{ t.status|status_label }}</td>
-      <td>{{ t.priority|priority_label }}</td>
-      <td>{{ t.performer.full_name() if t.performer else '—' }}</td>
-      <td>{{ t.created_at|datefmt }}</td>
-    </tr>
-    {% else %}
-    <tr><td colspan="7">Нет заявок</td></tr>
-    {% endfor %}
-  </table>
+<div id="assign-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Assign performer</h3>
+    <select id="assign-user"></select>
+    <div class="actions">
+      <button class="btn-primary" onclick="submitAssign()">Save</button>
+      <button onclick="closeModal('assign-modal')">Cancel</button>
+    </div>
+  </div>
 </div>
 {% endblock %}

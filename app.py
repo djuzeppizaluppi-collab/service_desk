@@ -11,6 +11,7 @@ from flask import (Flask, render_template, request, redirect, jsonify,
                    flash, url_for, send_from_directory)
 from flask_login import (LoginManager, login_user, login_required,
                          logout_user, current_user)
+from sqlalchemy import case
 
 from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
                     SlaPolicy, ServiceCatalog, ApprovalRoute, ApprovalStep,
@@ -19,7 +20,7 @@ from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
     create_user_db, reset_password_db, verify_password,
     _set_password_hash, _ensure_role, _ensure_work_group,
     generate_ticket_number, compute_deadline,
-    add_ticket_history, notify, notify_ticket_update, audit,
+    add_ticket_history, notify, notify_ticket_update,
     create_approval_chain, process_approval_decision,
     generate_password, format_mobile, normalize_gender,
 )
@@ -693,99 +694,55 @@ def tickets_board():
         flash('Доступ запрещён', 'error')
         return redirect('/')
 
-    view_mode = request.args.get('view', 'board')
-    fs   = request.args.get('status', '')
-    fa   = request.args.get('assignee', '')
-    fd_from = request.args.get('date_from', '')
-    fd_to   = request.args.get('date_to', '')
-    fwg  = request.args.get('work_group', '')
-    fp   = request.args.get('priority', '')
+    return render_template('tickets.html')
 
-    query = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid)
 
-    if current_user.role == 'admin':
-        all_wgs = WorkGroup.query.filter_by(isactive=True).order_by(WorkGroup.group_name).all()
-        if fwg:
-            query = query.filter(ServiceCatalog.work_group_uid == fwg)
-    else:
-        my_uids = _wg_uids(current_user)
-        all_wgs = WorkGroup.query.filter(
-            WorkGroup.work_group_uid.in_(my_uids)
-        ).order_by(WorkGroup.group_name).all()
-        if fwg and fwg in my_uids:
-            query = query.filter(ServiceCatalog.work_group_uid == fwg)
-        else:
-            query = query.filter(ServiceCatalog.work_group_uid.in_(my_uids))
-
-    if fs:
-        query = query.filter(Ticket.status == fs)
-    if fp:
-        query = query.filter(Ticket.priority == fp)
-    if fa == 'me':
+def _task_queue_query(filter_name='all', performer_uid=None):
+    wg_uids = _wg_uids(current_user)
+    query = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid).filter(
+        ServiceCatalog.work_group_uid.in_(wg_uids)
+    )
+    if filter_name == 'my':
         query = query.filter(Ticket.performer_uid == current_user.user_uid)
-    elif fa == 'unassigned':
-        query = query.filter(Ticket.performer_uid == None)
-    elif fa:
-        query = query.filter(Ticket.performer_uid == fa)
-    if fd_from:
-        try:
-            query = query.filter(Ticket.created_at >= datetime.strptime(fd_from, '%Y-%m-%d'))
-        except ValueError:
-            pass
-    if fd_to:
-        try:
-            query = query.filter(
-                Ticket.created_at < datetime.strptime(fd_to, '%Y-%m-%d') + timedelta(days=1)
-            )
-        except ValueError:
-            pass
+    elif filter_name == 'overdue':
+        query = query.filter(
+            Ticket.deadline_at != None,
+            Ticket.deadline_at < datetime.utcnow(),
+            ~Ticket.status.in_(['resolved', 'closed', 'cancelled'])
+        )
+    if performer_uid:
+        query = query.filter(Ticket.performer_uid == performer_uid)
 
-    tickets = query.order_by(Ticket.created_at.desc()).all()
+    priority_sort = case(
+        (Ticket.priority == 'critical', 4),
+        (Ticket.priority == 'high', 3),
+        (Ticket.priority == 'medium', 2),
+        else_=1,
+    )
+    return query.order_by(Ticket.deadline_at.asc().nullslast(), priority_sort.desc(), Ticket.created_at.asc())
 
-    board = {}
-    for col_key, (col_name, col_statuses) in BOARD_COLUMNS.items():
-        board[col_key] = {
-            'name': col_name,
-            'tickets': [t for t in tickets if t.status in col_statuses],
-        }
 
-    sq_base = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid)
-    if current_user.role != 'admin':
-        sq_base = sq_base.filter(ServiceCatalog.work_group_uid.in_(_wg_uids(current_user)))
-
-    all_active = sq_base.filter(
-        Ticket.status.in_(['new', 'assigned', 'in_progress']),
-        Ticket.deadline_at != None,
-    ).all()
-    stats = {
-        'total':       sq_base.count(),
-        'new':         sq_base.filter(Ticket.status == 'new').count(),
-        'in_progress': sq_base.filter(Ticket.status == 'in_progress').count(),
-        'on_hold':     sq_base.filter(Ticket.status == 'on_hold').count(),
-        'resolved':    sq_base.filter(Ticket.status == 'resolved').count(),
-        'overdue':     sum(1 for t in all_active if t.is_overdue()),
-    }
-
-    if current_user.role == 'admin':
-        specialists = User.query.join(UserRole).filter(
-            UserRole.role.in_(['specialist', 'manager', 'admin']),
-            User.is_deactivated == False,
-        ).order_by(User.last_name).all()
-    else:
-        specialists = User.query.join(UserWorkGroup).filter(
-            UserWorkGroup.work_group_uid.in_(_wg_uids(current_user))
-        ).join(UserRole, User.user_uid == UserRole.user_uid).filter(
-            UserRole.role.in_(['specialist', 'manager']),
-            User.is_deactivated == False,
-        ).order_by(User.last_name).all()
-
-    return render_template('tickets.html',
-                           board=board, tickets=tickets, stats=stats,
-                           specialists=specialists, all_wgs=all_wgs,
-                           view_mode=view_mode,
-                           filters={'status': fs, 'assignee': fa,
-                                    'date_from': fd_from, 'date_to': fd_to,
-                                    'work_group': fwg, 'priority': fp})
+@app.route('/api/tickets', methods=['GET'])
+@login_required
+def list_task_queue():
+    if not is_specialist():
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    filter_name = request.args.get('filter', 'all')
+    if filter_name not in {'all', 'my', 'overdue'}:
+        filter_name = 'all'
+    user_id = request.args.get('user_id') or None
+    tickets = _task_queue_query(filter_name=filter_name, performer_uid=user_id).all()
+    return jsonify([{
+        'ticket_uid': t.ticket_uid,
+        'ticket_number': t.ticket_number,
+        'summary': t.summary,
+        'status': t.status,
+        'performer_uid': t.performer_uid,
+        'performer': t.performer.full_name() if t.performer else '—',
+        'deadline_at': t.deadline_at.isoformat() if t.deadline_at else None,
+        'priority': t.priority,
+        'is_overdue': t.is_overdue(),
+    } for t in tickets])
 
 
 # ============================================================
@@ -822,6 +779,8 @@ def create_ticket_form():
     db.session.add(ticket)
     db.session.flush()
     add_ticket_history(ticket.ticket_uid, 'status', None, 'new', current_user.user_uid)
+    notify_ticket_update(ticket, f'Создана новая заявка {ticket.ticket_number}',
+                         exclude_uid=current_user.user_uid)
     db.session.commit()
     flash(f'Заявка {ticket.ticket_number} создана', 'success')
     return redirect(f'/ticket/{ticket.ticket_uid}')
@@ -868,13 +827,9 @@ def create_ticket():
 
     if catalog.approval_required:
         create_approval_chain(ticket, catalog, current_user)
-        first = TicketApproval.query.filter_by(
-            ticket_uid=ticket.ticket_uid, status='pending'
-        ).order_by(TicketApproval.step_order).first()
-        if first and first.approver_uid:
-            notify(first.approver_uid,
-                   f'Требуется согласование заявки {ticket.ticket_number}',
-                   ticket_uid=ticket.ticket_uid)
+    else:
+        notify_ticket_update(ticket, f'Создана новая заявка {ticket.ticket_number}',
+                             exclude_uid=current_user.user_uid)
 
     db.session.commit()
     return jsonify({'success': True, 'ticket_number': ticket.ticket_number,
@@ -1045,10 +1000,19 @@ def update_ticket(ticket_uid):
         if current_user.role not in ('admin', 'manager'):
             return jsonify({'error': 'Недостаточно прав'}), 403
         new_perf = data.get('performer_uid') or None
+        if new_perf:
+            member = UserWorkGroup.query.join(
+                ServiceCatalog, ServiceCatalog.work_group_uid == UserWorkGroup.work_group_uid
+            ).filter(
+                ServiceCatalog.catalog_uid == ticket.catalog_uid,
+                UserWorkGroup.user_uid == new_perf,
+            ).first()
+            if not member:
+                return jsonify({'error': "Performer is not in the ticket's work group"}), 400
         old_st   = ticket.status
         add_ticket_history(ticket_uid, 'performer', ticket.performer_uid, new_perf, current_user.user_uid)
         ticket.performer_uid = new_perf
-        ticket.status = 'assigned' if new_perf else 'new'
+        ticket.status = 'in_progress' if new_perf else 'new'
         if old_st != ticket.status:
             add_ticket_history(ticket_uid, 'status', old_st, ticket.status, current_user.user_uid)
         if new_perf:
@@ -1112,6 +1076,86 @@ def update_ticket(ticket_uid):
     ticket.updated_by = current_user.user_uid
     db.session.commit()
     return jsonify({'success': True})
+
+
+@app.post('/tickets/<ticket_uid>/assign')
+@login_required
+def api_assign_ticket(ticket_uid):
+    if current_user.role not in ('admin', 'manager'):
+        return jsonify({'error': 'Недостаточно прав'}), 403
+    data = request.get_json() or {}
+    performer_uid = data.get('performer_uid')
+    if not performer_uid:
+        return jsonify({'error': 'performer_uid is required'}), 400
+    ticket = Ticket.query.get_or_404(ticket_uid)
+    member = UserWorkGroup.query.join(
+        ServiceCatalog, ServiceCatalog.work_group_uid == UserWorkGroup.work_group_uid
+    ).filter(
+        ServiceCatalog.catalog_uid == ticket.catalog_uid,
+        UserWorkGroup.user_uid == performer_uid,
+    ).first()
+    if not member:
+        return jsonify({'error': "Performer is not in the ticket's work group"}), 400
+    old_perf = ticket.performer_uid
+    old_status = ticket.status
+    ticket.performer_uid = performer_uid
+    ticket.status = 'in_progress'
+    add_ticket_history(ticket.ticket_uid, 'performer_uid', old_perf, performer_uid, current_user.user_uid)
+    if old_status != 'in_progress':
+        add_ticket_history(ticket.ticket_uid, 'status', old_status, 'in_progress', current_user.user_uid)
+    notify(performer_uid, f'You were assigned to ticket {ticket.ticket_number}', ticket.ticket_uid)
+    notify_ticket_update(ticket, f'Исполнитель назначен для заявки {ticket.ticket_number}',
+                         exclude_uid=current_user.user_uid)
+    ticket.updated_at = datetime.utcnow()
+    ticket.updated_by = current_user.user_uid
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@app.post('/tickets/<ticket_uid>/status')
+@login_required
+def api_ticket_status(ticket_uid):
+    ticket = Ticket.query.get_or_404(ticket_uid)
+    if not _can_edit_ticket(ticket):
+        return jsonify({'error': 'Доступ запрещён'}), 403
+    new_status = (request.get_json() or {}).get('status')
+    allowed = {'new', 'in_progress', 'resolved'}
+    if new_status not in allowed:
+        return jsonify({'error': 'Invalid status'}), 400
+    old_status = ticket.status
+    ticket.status = new_status
+    ticket.updated_at = datetime.utcnow()
+    ticket.updated_by = current_user.user_uid
+    if new_status == 'resolved':
+        ticket.resolved_at = datetime.utcnow()
+    add_ticket_history(ticket.ticket_uid, 'status', old_status, new_status, current_user.user_uid)
+    notify_ticket_update(ticket, f'Status changed to {new_status}', current_user.user_uid)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@app.post('/tickets/<ticket_uid>/approve')
+@login_required
+def api_ticket_approve(ticket_uid):
+    ticket = Ticket.query.get_or_404(ticket_uid)
+    data = request.get_json() or {}
+    decision = data.get('decision')
+    comment = (data.get('comment') or '').strip()
+    approval = TicketApproval.query.filter_by(
+        ticket_uid=ticket_uid,
+        approver_uid=current_user.user_uid,
+        status='pending',
+    ).order_by(TicketApproval.step_order).first()
+    if not approval:
+        return jsonify({'error': 'Запись согласования не найдена'}), 404
+    try:
+        process_approval_decision(ticket, approval, decision, comment, current_user.user_uid)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    ticket.updated_at = datetime.utcnow()
+    ticket.updated_by = current_user.user_uid
+    db.session.commit()
+    return jsonify({'ok': True})
 
 
 # ============================================================
@@ -1631,8 +1675,6 @@ def delete_category(cat_uid):
                 return jsonify({'error': msg}), 400
             flash(msg, 'error')
             return redirect('/admin/categories')
-    audit(current_user.user_uid, 'delete_category', 'service_catalog', cat_uid,
-          f'Удалена категория {cat.catalog_name}', request.remote_addr)
     db.session.delete(cat)
     db.session.commit()
     if request.is_json:
