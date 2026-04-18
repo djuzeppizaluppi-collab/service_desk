@@ -30,6 +30,7 @@ from models import (db, User, Password, UserRole, WorkGroup, UserWorkGroup,
 # ============================================================
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'sd-secret-key-change-in-prod')
+app.json.ensure_ascii = False
 
 DB_CONFIG = {
     "user": "service_desk_user",
@@ -41,8 +42,13 @@ DB_CONFIG = {
 app.config['SQLALCHEMY_DATABASE_URI'] = (
     f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@"
     f"{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+    f"?client_encoding=utf8"
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'connect_args': {'client_encoding': 'utf8'},
+    'pool_pre_ping': True,
+}
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'pdf', 'doc', 'docx',
@@ -276,6 +282,11 @@ def init_db():
     db.session.execute(text("""
         ALTER TABLE IF EXISTS sm.tickets
             ADD COLUMN IF NOT EXISTS deadline_at timestamptz NULL
+    """))
+    db.session.execute(text("""
+        ALTER TABLE IF EXISTS sm.users
+            ALTER COLUMN mobile TYPE varchar(20),
+            ALTER COLUMN work_phone TYPE varchar(20)
     """))
     db.session.commit()
 
