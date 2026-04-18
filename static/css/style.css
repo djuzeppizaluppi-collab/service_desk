@@ -38,3 +38,42 @@ button,.btn { display:inline-block; border:1px solid var(--border); background:#
 small.muted,.muted { color:var(--muted); }
 .inline { display:flex; gap:8px; align-items:center; }
 .actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+#filters { display:flex; gap:.5rem; margin-bottom:1rem; flex-wrap:wrap; }
+#queue select { min-width: 120px; }
+.overdue td { color: var(--danger); }
+
+.hidden { display: none !important; }
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-box {
+  background: var(--surface);
+  padding: 1.5rem;
+  border-radius: 8px;
+  min-width: 320px;
+  border: 1px solid var(--border);
+}
+#notif-wrapper { position: relative; }
+#notif-wrapper button { border: 1px solid #334155; background: #1e293b; color: #e2e8f0; }
+#notif-dropdown {
+  position: absolute;
+  right: 0;
+  top: 42px;
+  width: 320px;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .5rem;
+}
+#notif-dropdown ul { list-style: none; margin: 0; padding: 0; }
+#notif-dropdown li { padding: .4rem; border-bottom: 1px solid var(--border); }
+#notif-dropdown li:last-child { border-bottom: 0; }

@@ -663,38 +663,24 @@ def audit(user_uid, action, entity_type=None, entity_uid=None, details=None, ip=
 
 
 def create_approval_chain(ticket, catalog, requester):
-    from models import User
-    route = ApprovalRoute.query.filter_by(catalog_uid=catalog.catalog_uid, is_active=True).first()
-    if route:
-        steps = ApprovalStep.query.filter_by(route_uid=route.route_uid).order_by(ApprovalStep.step_order).all()
-        for step in steps:
-            approver_uid = step.approver_uid
-            if not approver_uid and step.approver_role:
-                candidate = User.query.join(UserRole).filter(
-                    UserRole.role == step.approver_role,
-                    User.is_deactivated == False
-                ).first()
-                approver_uid = candidate.user_uid if candidate else None
-            db.session.add(TicketApproval(
-                ticket_uid=ticket.ticket_uid,
-                step_order=step.step_order,
-                step_name=step.step_name or f'Шаг {step.step_order}',
-                approver_uid=approver_uid,
-                status='pending',
-            ))
-        return
-
     approver_uid = requester.manager_uid
     if not approver_uid:
-        manager = User.query.join(UserRole).filter(UserRole.role.in_(['manager', 'admin'])).first()
+        manager = db.session.execute(text(
+            "SELECT u.user_uid FROM sm.users u "
+            "JOIN sm.user_roles r ON r.user_uid = u.user_uid "
+            "WHERE r.role IN ('manager','admin') LIMIT 1"
+        )).first()
         approver_uid = manager.user_uid if manager else None
-    db.session.add(TicketApproval(
-        ticket_uid=ticket.ticket_uid,
-        step_order=1,
-        step_name='Согласование руководителя',
-        approver_uid=approver_uid,
-        status='pending',
-    ))
+    if approver_uid:
+        db.session.add(TicketApproval(
+            ticket_uid=ticket.ticket_uid,
+            step_order=1,
+            step_name='Manager Approval',
+            approver_uid=approver_uid,
+            status='pending',
+        ))
+        ticket.status = 'pending_approval'
+        notify(approver_uid, f'Approval required for {ticket.ticket_number}', ticket.ticket_uid)
 
 
 def process_approval_decision(ticket, approval, decision, comment, actor_uid):
@@ -725,6 +711,6 @@ def process_approval_decision(ticket, approval, decision, comment, actor_uid):
                    ticket_uid=ticket.ticket_uid)
     else:
         previous = ticket.status
-        ticket.status = 'approved'
-        add_ticket_history(ticket.ticket_uid, 'status', previous, 'approved', actor_uid)
+        ticket.status = 'new'
+        add_ticket_history(ticket.ticket_uid, 'status', previous, 'new', actor_uid)
         notify_ticket_update(ticket, f'Заявка {ticket.ticket_number} согласована', exclude_uid=actor_uid)

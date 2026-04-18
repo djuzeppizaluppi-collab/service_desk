@@ -23,6 +23,14 @@
       {% endif %}
     </div>
     <div class="nav-right">
+      <div id="notif-wrapper">
+        <button type="button" onclick="toggleNotifDropdown()">
+          🔔 <span id="notif-badge" class="badge hidden">0</span>
+        </button>
+        <div id="notif-dropdown" class="hidden">
+          <ul id="notif-list"></ul>
+        </div>
+      </div>
       <a href="{{ url_for('profile') }}">{{ current_user.first_name }}</a>
       <a href="{{ url_for('logout') }}">Выйти</a>
     </div>
