@@ -704,15 +704,21 @@ def tickets_board():
     if not is_specialist():
         flash('Доступ запрещён', 'error')
         return redirect('/')
+    work_groups = (WorkGroup.query.filter_by(isactive=True).order_by(WorkGroup.group_name).all()
+                   if current_user.role == 'admin' else [])
+    return render_template('tickets.html', work_groups=work_groups)
 
-    return render_template('tickets.html')
 
+def _task_queue_query(filter_name='all', performer_uid=None, work_group_uid=None):
+    query = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid)
+    if current_user.role == 'admin':
+        if work_group_uid:
+            query = query.filter(ServiceCatalog.work_group_uid == work_group_uid)
+        # admin without wg filter sees all tickets
+    else:
+        wg_uids = _wg_uids(current_user)
+        query = query.filter(ServiceCatalog.work_group_uid.in_(wg_uids))
 
-def _task_queue_query(filter_name='all', performer_uid=None):
-    wg_uids = _wg_uids(current_user)
-    query = Ticket.query.join(ServiceCatalog, Ticket.catalog_uid == ServiceCatalog.catalog_uid).filter(
-        ServiceCatalog.work_group_uid.in_(wg_uids)
-    )
     if filter_name == 'my':
         query = query.filter(Ticket.performer_uid == current_user.user_uid)
     elif filter_name == 'overdue':
@@ -742,7 +748,8 @@ def list_task_queue():
     if filter_name not in {'all', 'my', 'overdue'}:
         filter_name = 'all'
     user_id = request.args.get('user_id') or None
-    tickets = _task_queue_query(filter_name=filter_name, performer_uid=user_id).all()
+    work_group_uid = request.args.get('work_group_uid') or None
+    tickets = _task_queue_query(filter_name=filter_name, performer_uid=user_id, work_group_uid=work_group_uid).all()
     return jsonify([{
         'ticket_uid': t.ticket_uid,
         'ticket_number': t.ticket_number,

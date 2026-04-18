@@ -5,19 +5,27 @@
   <h2>Очередь задач</h2>
   <div id="filters">
     <select id="filter-select">
-      <option value="all">All tasks</option>
-      <option value="my">My tasks</option>
-      <option value="overdue">Overdue</option>
+      <option value="all">Все задачи</option>
+      <option value="my">Мои задачи</option>
+      <option value="overdue">Просроченные</option>
     </select>
     <select id="user-select">
-      <option value="">— by performer —</option>
+      <option value="">— по исполнителю —</option>
     </select>
+    {% if current_user.role == 'admin' %}
+    <select id="wg-select">
+      <option value="">— все рабочие группы —</option>
+      {% for wg in work_groups %}
+      <option value="{{ wg.work_group_uid }}">{{ wg.group_name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
   </div>
   <table id="queue" class="table">
     <thead>
     <tr>
-      <th>#</th><th>Summary</th><th>Status</th>
-      <th>Performer</th><th>Deadline</th><th>Priority</th><th>Actions</th>
+      <th>#</th><th>Описание</th><th>Статус</th>
+      <th>Исполнитель</th><th>Срок</th><th>Приоритет</th><th>Действия</th>
     </tr>
     </thead>
     <tbody></tbody>
@@ -26,11 +34,11 @@
 
 <div id="assign-modal" class="modal hidden">
   <div class="modal-box">
-    <h3>Assign performer</h3>
+    <h3>Назначить исполнителя</h3>
     <select id="assign-user"></select>
     <div class="actions">
-      <button class="btn-primary" onclick="submitAssign()">Save</button>
-      <button onclick="closeModal('assign-modal')">Cancel</button>
+      <button class="btn-primary" onclick="submitAssign()">Сохранить</button>
+      <button onclick="closeModal('assign-modal')">Отмена</button>
     </div>
   </div>
 </div>
