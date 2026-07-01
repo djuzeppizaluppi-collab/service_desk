@@ -230,3 +230,102 @@ python app.py
 ## История изменений
 
 Любое изменение поля заявки (статус, исполнитель, описание, приоритет) фиксируется в `sm.ticket_history` с указанием старого значения, нового значения, автора изменения и времени. История отображается в модальном окне заявки на доске (раскрывающийся блок).
+
+CREATE OR REPLACE FUNCTION public.label_anon_text_columns_for_not_empty_tables(
+    p_tables  text[],
+    p_label   text DEFAULT $$MASKED WITH VALUE '*'$$,
+    p_execute boolean DEFAULT false
+)
+RETURNS TABLE (
+    table_name  text,
+    column_name text,
+    column_type regtype,
+    ddl         text,
+    executed    boolean
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_table_text text;
+    v_table_oid  regclass;
+    v_has_rows   boolean;
+    v_col        record;
+    v_sql        text;
+BEGIN
+    FOREACH v_table_text IN ARRAY p_tables
+    LOOP
+        v_table_oid := to_regclass(v_table_text);
+
+        IF v_table_oid IS NULL THEN
+            RAISE NOTICE 'Таблица не найдена: %', v_table_text;
+            CONTINUE;
+        END IF;
+
+        EXECUTE format(
+            'SELECT EXISTS (SELECT 1 FROM %s LIMIT 1)',
+            v_table_oid
+        )
+        INTO v_has_rows;
+
+        IF NOT v_has_rows THEN
+            CONTINUE;
+        END IF;
+
+        FOR v_col IN
+            SELECT
+                a.attname AS column_name,
+                a.atttypid::regtype AS column_type
+            FROM pg_attribute a
+            WHERE a.attrelid = v_table_oid
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+              AND a.atttypid IN (
+                    'text'::regtype,
+                    'character varying'::regtype
+              )
+            ORDER BY a.attnum
+        LOOP
+            v_sql := format(
+                'SECURITY LABEL FOR anon ON COLUMN %s.%I IS %L',
+                v_table_oid,
+                v_col.column_name,
+                p_label
+            );
+
+            IF p_execute THEN
+                EXECUTE v_sql;
+            END IF;
+
+            table_name  := v_table_oid::text;
+            column_name := v_col.column_name;
+            column_type := v_col.column_type;
+            ddl         := v_sql;
+            executed    := p_execute;
+
+            RETURN NEXT;
+        END LOOP;
+    END LOOP;
+END;
+$$;
+
+SELECT *
+FROM public.label_anon_text_columns_for_not_empty_tables(
+    ARRAY[
+        'schema1.table1',
+        'schema1.table2',
+        'schema2.table3'
+    ],
+    $$MASKED WITH VALUE '*'$$,
+    false
+);
+
+SELECT *
+FROM public.label_anon_text_columns_for_not_empty_tables(
+    ARRAY[
+        'schema1.table1',
+        'schema1.table2',
+        'schema2.table3'
+    ],
+    $$MASKED WITH FUNCTION anon.fake_first_name()$$,
+    true
+);
