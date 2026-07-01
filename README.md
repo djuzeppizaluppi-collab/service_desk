@@ -650,7 +650,11 @@ BEGIN
         v_total_rows;
 END;
 $$;
+
+
 4. Функция сброса failed / зависших in_progress
+
+   
 CREATE OR REPLACE FUNCTION anon.reset_anonymize_job_chunks(
     p_job_id bigint,
     p_reset_failed boolean DEFAULT true,
