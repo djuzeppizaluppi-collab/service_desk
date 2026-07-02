@@ -1,0 +1,124 @@
+CREATE OR REPLACE FUNCTION public.label_anon_text_columns_for_not_empty_tables(
+    p_tables  text[],
+    p_label   text DEFAULT $$MASKED WITH VALUE '*'$$,
+    p_execute boolean DEFAULT false
+)
+RETURNS TABLE (
+    table_name      text,
+    row_count       bigint,
+    pk_column       text,
+    min_pk          text,
+    max_pk          text,
+    table_size_mb   numeric,
+    column_name     text,
+    column_type     regtype,
+    ddl             text,
+    executed        boolean
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_table_text    text;
+    v_table_oid     regclass;
+    v_has_rows      boolean;
+    v_row_count     bigint;
+    v_table_size_mb numeric;
+
+    v_pk_column     text;
+    v_min_pk        text;
+    v_max_pk        text;
+
+    v_col           record;
+    v_sql           text;
+BEGIN
+    FOREACH v_table_text IN ARRAY p_tables
+    LOOP
+        v_table_oid := to_regclass(v_table_text);
+
+        IF v_table_oid IS NULL THEN
+            RAISE NOTICE 'Таблица не найдена: %', v_table_text;
+            CONTINUE;
+        END IF;
+
+        EXECUTE format(
+            'SELECT count(*) FROM %s',
+            v_table_oid
+        )
+        INTO v_row_count;
+
+        IF v_row_count = 0 THEN
+            CONTINUE;
+        END IF;
+
+        v_has_rows := true;
+
+        SELECT round(pg_total_relation_size(v_table_oid)::numeric / 1024 / 1024, 2)
+        INTO v_table_size_mb;
+
+        /*
+          Ищем только одноколоночный primary key.
+          Если PK составной, v_pk_column останется NULL.
+        */
+        SELECT a.attname
+        INTO v_pk_column
+        FROM pg_index i
+        JOIN pg_attribute a
+          ON a.attrelid = i.indrelid
+         AND a.attnum = i.indkey[0]
+        WHERE i.indrelid = v_table_oid
+          AND i.indisprimary
+          AND array_length(i.indkey, 1) = 1;
+
+        IF v_pk_column IS NOT NULL THEN
+            EXECUTE format(
+                'SELECT min(%1$I)::text, max(%1$I)::text FROM %2$s',
+                v_pk_column,
+                v_table_oid
+            )
+            INTO v_min_pk, v_max_pk;
+        ELSE
+            v_min_pk := NULL;
+            v_max_pk := NULL;
+        END IF;
+
+        FOR v_col IN
+            SELECT
+                a.attname AS column_name,
+                a.atttypid::regtype AS column_type
+            FROM pg_attribute a
+            WHERE a.attrelid = v_table_oid
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+              AND a.atttypid IN (
+                    'text'::regtype,
+                    'character varying'::regtype
+              )
+            ORDER BY a.attnum
+        LOOP
+            v_sql := format(
+                'SECURITY LABEL FOR anon ON COLUMN %s.%I IS %L',
+                v_table_oid,
+                v_col.column_name,
+                p_label
+            );
+
+            IF p_execute THEN
+                EXECUTE v_sql;
+            END IF;
+
+            table_name    := v_table_oid::text;
+            row_count     := v_row_count;
+            pk_column     := v_pk_column;
+            min_pk        := v_min_pk;
+            max_pk        := v_max_pk;
+            table_size_mb := v_table_size_mb;
+            column_name   := v_col.column_name;
+            column_type   := v_col.column_type;
+            ddl           := v_sql;
+            executed      := p_execute;
+
+            RETURN NEXT;
+        END LOOP;
+    END LOOP;
+END;
+$$;
