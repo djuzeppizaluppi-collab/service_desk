@@ -329,3 +329,76 @@ FROM public.label_anon_text_columns_for_not_empty_tables(
     $$MASKED WITH FUNCTION anon.fake_first_name()$$,
     true
 );
+
+
+-- ============================================================
+-- СКРИПТ: Генерация DDL для создания всех функций
+-- Назначение: Собрать все CREATE FUNCTION в один скрипт
+-- ============================================================
+
+\pset tuples_only off
+\pset footer off
+\set ECHO none
+
+-- Генерируем DDL для всех пользовательских функций
+WITH all_functions AS (
+    SELECT 
+        pg_get_functiondef(p.oid) AS ddl
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname NOT LIKE 'pg_temp%'
+      AND n.nspname NOT LIKE 'pg_toast%'
+)
+SELECT 
+    string_agg(ddl, ';' || E'\n' || E'\n') AS functions_ddl
+FROM all_functions
+\gset result_
+
+-- Вывод готового скрипта для создания
+\echo '========== СКРИПТ ДЛЯ СОЗДАНИЯ ФУНКЦИЙ =========='
+\echo :result_functions_ddl
+\echo '========== КОНЕЦ СКРИПТА =========='
+
+
+-- ============================================================
+-- СКРИПТ: Генерация DDL для удаления всех функций
+-- Назначение: Собрать все DROP FUNCTION в один скрипт
+-- ============================================================
+
+\pset tuples_only off
+\pset footer off
+\set ECHO none
+
+-- Формируем DROP для каждой функции с полной сигнатурой
+WITH all_functions AS (
+    SELECT 
+        n.nspname AS schema_name,
+        p.proname AS func_name,
+        pg_get_function_identity_arguments(p.oid) AS args,  -- Полный список аргументов с типами
+        p.oid
+    FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND n.nspname NOT LIKE 'pg_temp%'
+      AND n.nspname NOT LIKE 'pg_toast%'
+      AND p.proname NOT LIKE 'pg_%'  -- Исключаем системные
+),
+drop_statements AS (
+    SELECT 
+        format('DROP FUNCTION IF EXISTS %I.%I(%s) CASCADE;', 
+               schema_name, 
+               func_name, 
+               args) AS drop_ddl
+    FROM all_functions
+    ORDER BY schema_name, func_name
+)
+SELECT 
+    string_agg(drop_ddl, E'\n') AS drop_script
+FROM drop_statements
+\gset result_
+
+-- Вывод готового скрипта для удаления
+\echo '========== СКРИПТ ДЛЯ УДАЛЕНИЯ ФУНКЦИЙ =========='
+\echo :result_drop_script
+\echo '========== КОНЕЦ СКРИПТА =========='
