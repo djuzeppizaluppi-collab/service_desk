@@ -19,3 +19,11 @@ BEGIN
         RAISE NOTICE 'Dropped: %.%(%)', r.schema_name, r.proc_name, r.args;
     END LOOP;
 END $$;
+
+
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pg_depend d
+              WHERE d.objid = p.oid
+                AND d.deptype = 'e'
+          )
