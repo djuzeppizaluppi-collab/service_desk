@@ -1,29 +1,43 @@
+AND EXISTS (
+    SELECT 1
+    FROM (
+        SELECT
+            x.dt,
+            SUM(x.delta) OVER (
+                ORDER BY x.dt
+            ) AS total_balance
+        FROM (
+            SELECT
+                GREATEST(b.start_date, p_start_date) AS dt,
+                SUM(
+                    COALESCE(b.total_credit, 0)
+                    - COALESCE(b.total_debit, 0)
+                ) AS delta
+            FROM back_office.account a
+            JOIN back_office.balance b
+                ON b.account_id = a.id
+            WHERE a.owner_contract_id = c.id
+              AND b.start_date <= p_end_date
+              AND b.end_date > p_start_date
+            GROUP BY 1
 
-DO $$
-DECLARE
-    r RECORD;
-BEGIN
-    FOR r IN
-        SELECT n.nspname AS schema_name,
-               p.proname AS proc_name,
-               pg_get_function_identity_arguments(p.oid) AS args
-        FROM pg_proc p
-        JOIN pg_namespace n ON n.oid = p.pronamespace
-        WHERE p.prokind = 'p'  -- 'p' = procedure
-          AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-          AND n.nspname NOT LIKE 'pg_toast%'
-          AND n.nspname NOT LIKE 'pg_temp%'
-    LOOP
-        EXECUTE format('DROP PROCEDURE IF EXISTS %I.%I(%s) CASCADE',
-                       r.schema_name, r.proc_name, r.args);
-        RAISE NOTICE 'Dropped: %.%(%)', r.schema_name, r.proc_name, r.args;
-    END LOOP;
-END $$;
+            UNION ALL
 
-
-          AND NOT EXISTS (
-              SELECT 1
-              FROM pg_depend d
-              WHERE d.objid = p.oid
-                AND d.deptype = 'e'
-          )
+            SELECT
+                b.end_date AS dt,
+                -SUM(
+                    COALESCE(b.total_credit, 0)
+                    - COALESCE(b.total_debit, 0)
+                ) AS delta
+            FROM back_office.account a
+            JOIN back_office.balance b
+                ON b.account_id = a.id
+            WHERE a.owner_contract_id = c.id
+              AND b.start_date <= p_end_date
+              AND b.end_date > p_start_date
+              AND b.end_date <= p_end_date
+            GROUP BY 1
+        ) x
+    ) t
+    WHERE t.total_balance > 0
+)
