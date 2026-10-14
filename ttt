@@ -1,1 +1,315 @@
-1
+ RETURN QUERY
+    WITH RECURSIVE
+    base AS (
+        SELECT s.id, s.contract_id,
+               CASE
+                   WHEN appl.individual_id = c.individual_id
+                        AND appl.individual_id <> s.individual_id THEN 'Вкладчик'
+                   WHEN appl.individual_id = s.individual_id THEN 'Участник'
+                   WHEN c.individual_id = s.individual_id THEN 'Участник'
+                   ELSE 'Вкладчик'
+               END AS who
+        FROM ourpension.sharer s
+        JOIN ourpension.contract c ON c.id = s.contract_id
+        LEFT JOIN LATERAL (
+            SELECT DISTINCT ON (atc.sharer_id)
+                   atc.sharer_id,
+                   atc.application_personal_data_individual_id AS individual_id
+            FROM ourpension.application_termination_contract atc
+            WHERE atc.sharer_id = s.id
+              AND atc."date" <= p_calc_date
+            ORDER BY atc.sharer_id, atc."date" DESC, atc."version" DESC
+        ) appl ON true
+        WHERE s.id = p_sharer_id
+    ),
+    -- Исходные транзакции: сохранено разделение credit/debit и фильтры из снимков.
+    trans_raw_credit AS (
+        SELECT s.id, ot.code AS operation_name, at2.mnemonics,
+               SUM(t.value)::numeric AS trans_amount
+        FROM back_office.operation o
+        JOIN back_office.transaction t ON o.id = t.operation_id
+        JOIN back_office.account a ON t.credit_account_id = a.id
+        JOIN back_office.account_type at2 ON at2.id = a.account_type_id
+        JOIN ourpension.sharer s ON s.id = a.owner_sharer_id
+        JOIN back_office.operation_type ot ON ot.id = o.operation_type_id
+        WHERE s.id = p_sharer_id AND t.effective_date <= p_calc_date
+          AND EXISTS (
+              SELECT 1 FROM actuary.settings_for_redemption_calculation sc
+              WHERE sc."service_type" = 'NPO'
+                AND sc.calculation_type = 'FULL' AND sc.direction = 'credit'
+                AND sc.operation_type_code = ot.code
+                AND sc.operation_type_code IS NOT NULL
+                AND sc.mnemonics = at2.mnemonics
+                AND sc.mnemonics IS NOT NULL
+          )
+        GROUP BY s.id, ot.code, at2.mnemonics
+    ),
+    trans_raw_debit AS (
+        SELECT s.id, ot.code AS operation_name,
+               SUM(t.value)::numeric AS trans_amount
+        FROM back_office.operation o
+        JOIN back_office.transaction t ON o.id = t.operation_id
+        JOIN back_office.account a ON t.debit_account_id = a.id
+        JOIN ourpension.sharer s ON s.id = a.owner_sharer_id
+        JOIN back_office.operation_type ot ON ot.id = o.operation_type_id
+        WHERE s.id = p_sharer_id AND t.effective_date <= p_calc_date
+          AND EXISTS (
+              SELECT 1 FROM actuary.settings_for_redemption_calculation sc
+              WHERE sc."service_type" = 'NPO'
+                AND sc.calculation_type = 'FULL' AND sc.direction = 'debit'
+                AND sc.operation_type_code = ot.code
+                AND sc.operation_type_code IS NOT NULL
+          )
+        GROUP BY s.id, ot.code
+    ),
+    -- Сопоставление типов сумм. Вместо многократных FILTER IN SELECT DISTINCT
+    -- используется та же таблица настроек; операция+мнемоника проверяются совместно.
+    credit_mapped AS (
+        SELECT trc.id, trc.operation_name, trc.mnemonics,
+               trc.trans_amount, sc.s_ts
+        FROM trans_raw_credit trc
+        JOIN LATERAL (
+            SELECT DISTINCT sc.s_ts
+            FROM actuary.settings_for_redemption_calculation sc
+            WHERE sc."service_type" = 'NPO' AND sc.calculation_type = 'FULL'
+              AND sc.direction = 'credit'
+              AND sc.operation_type_code = trc.operation_name
+              AND sc.mnemonics = trc.mnemonics
+        ) sc ON true
+    ),
+    debit_mapped AS (
+        SELECT trd.id, trd.operation_name, trd.trans_amount, sc.s_ts
+        FROM trans_raw_debit trd
+        JOIN LATERAL (
+            SELECT DISTINCT sc.s_ts
+            FROM actuary.settings_for_redemption_calculation sc
+            WHERE sc."service_type" = 'NPO' AND sc.calculation_type = 'FULL'
+              AND sc.direction = 'debit'
+              AND sc.operation_type_code = trd.operation_name
+        ) sc ON true
+    ),
+    trans_calc_credit AS (
+        SELECT id,
+               SUM(trans_amount) FILTER (WHERE s_ts = 's_vznos') AS s_vznos,
+               SUM(trans_amount) FILTER (WHERE s_ts = 's_dd') AS s_dd,
+               SUM(trans_amount) FILTER (WHERE s_ts = 's_mgd') AS s_mgd,
+               SUM(trans_amount) FILTER (WHERE s_ts = 's_vosp') AS s_vosp,
+               jsonb_agg(jsonb_build_object('mnemonics',mnemonics,'amount',trans_amount)
+                         ORDER BY mnemonics) AS credit_included_json
+        FROM credit_mapped GROUP BY id
+    ),
+    trans_calc_debit AS (
+        SELECT id,
+               SUM(trans_amount) FILTER (WHERE s_ts = 's_vypl') AS s_vypl,
+               SUM(trans_amount) FILTER (WHERE s_ts = 's_perevod') AS s_perevod,
+               jsonb_agg(jsonb_build_object('operation_name',operation_name,'amount',trans_amount)
+                         ORDER BY operation_name) AS debit_included_json
+        FROM debit_mapped GROUP BY id
+    ),
+    -- Неучтённые операции: сохранена проверка только на дату расчёта.
+    not_included_trans_credit AS (
+        SELECT s.id, ot.code AS operation_name, at2.mnemonics,
+               SUM(t.value)::numeric AS trans_amount
+        FROM back_office.operation o
+        JOIN back_office.transaction t ON o.id = t.operation_id
+        JOIN back_office.account a ON t.credit_account_id = a.id
+        JOIN back_office.account_type at2 ON at2.id = a.account_type_id
+        JOIN ourpension.sharer s ON s.id = a.owner_sharer_id
+        JOIN back_office.operation_type ot ON ot.id = o.operation_type_id
+        WHERE s.id = p_sharer_id AND t.effective_date = p_calc_date
+          AND NOT EXISTS (SELECT 1 FROM trans_raw_credit trc
+                          WHERE trc.operation_name = ot.code
+                            AND trc.mnemonics = at2.mnemonics)
+        GROUP BY s.id, ot.code, at2.mnemonics
+    ),
+    not_included_trans_credit_json AS (
+        SELECT id,
+               jsonb_agg(jsonb_build_object('mnemonics',mnemonics,'amount',trans_amount)
+                         ORDER BY mnemonics) AS credit_not_included_json
+        FROM not_included_trans_credit GROUP BY id
+    ),
+    not_included_trans_debit AS (
+        SELECT s.id, ot.code AS operation_name,
+               SUM(t.value)::numeric AS trans_amount
+        FROM back_office.operation o
+        JOIN back_office.transaction t ON o.id = t.operation_id
+        JOIN back_office.account a ON t.debit_account_id = a.id
+        JOIN ourpension.sharer s ON s.id = a.owner_sharer_id
+        JOIN back_office.operation_type ot ON ot.id = o.operation_type_id
+        WHERE s.id = p_sharer_id AND t.effective_date = p_calc_date
+          AND NOT EXISTS (SELECT 1 FROM trans_raw_debit trd
+                          WHERE trd.operation_name = ot.code)
+        GROUP BY s.id, ot.code
+    ),
+    not_included_trans_debit_json AS (
+        SELECT id,
+               jsonb_agg(jsonb_build_object('operation_name',operation_name,'amount',trans_amount)
+                         ORDER BY operation_name) AS debit_not_included_json
+        FROM not_included_trans_debit GROUP BY id
+    ),
+    calc_params AS (
+        SELECT COALESCE(tcc.s_vznos,0)::numeric AS s_vznos,
+               COALESCE(tcc.s_dd,0)::numeric AS s_dd,
+               COALESCE(tcc.s_mgd,0)::numeric AS s_mgd,
+               COALESCE(tcc.s_vosp,0)::numeric AS s_vosp,
+               COALESCE(tcd.s_vypl,0)::numeric AS s_vypl,
+               COALESCE(tcd.s_perevod,0)::numeric AS s_perevod,
+               (COALESCE(tcd.s_vypl,0)+COALESCE(tcd.s_perevod,0))::numeric AS s_vypl_per
+        FROM base b
+        LEFT JOIN trans_calc_credit tcc ON tcc.id=b.id
+        LEFT JOIN trans_calc_debit tcd ON tcd.id=b.id
+    ),
+    coeff_params AS (
+        SELECT COALESCE(t.k1,1)::numeric AS k1,
+               COALESCE(t.k2,1)::numeric AS k2,
+               COALESCE(t.k3,1)::numeric AS k3,
+               COALESCE(t.k4,1)::numeric AS k4,
+               COALESCE(t.kf,1)::numeric AS kf,
+               -- ДОБАВЛЕНО S_SR: отсутствие строки коэффициентов не прерывает расчёт.
+               CASE WHEN t.sharer_id IS NULL
+                    THEN jsonb_build_object('code','REDEMPTION_COEFF_NOT_FOUND',
+                                            'message','Функция получения коэффициентов не вернула строк')
+                    ELSE t.details_json END AS details_json
+        FROM base b
+        LEFT JOIN LATERAL (
+            SELECT grc.sharer_id, grc.k1,grc.k2,grc.k3,grc.k4,grc.kf,grc.details_json
+            FROM actuary.get_redemption_coeff(
+                b.id, '{}'::integer[], 'NPO', p_calc_date, b.who, NULL, NULL
+            ) grc
+            WHERE grc.sharer_id=b.id
+        ) t ON true
+    ),
+    ost_pre_calc AS (
+        SELECT cm.s_ts, cm.mnemonics, cm.trans_amount,
+               cm.operation_name, cm.id
+        FROM credit_mapped cm
+        WHERE cm.s_ts IN ('s_vznos','s_dd','s_mgd','s_vosp')
+    ),
+    calc_ost AS (
+        SELECT CASE
+                   WHEN opc.s_ts='s_vznos' THEN opc.trans_amount*cp.k1
+                   WHEN opc.s_ts='s_dd' THEN opc.trans_amount*cp.k2
+                   WHEN opc.s_ts='s_mgd' THEN opc.trans_amount*cp.k3
+                   WHEN opc.s_ts='s_vosp' THEN opc.trans_amount*cp.k2
+               END AS amount_with_k,
+               opc.s_ts,opc.mnemonics,opc.id
+        FROM ost_pre_calc opc CROSS JOIN coeff_params cp
+    ),
+    calc_ost_by_type AS (
+        SELECT s_ts,mnemonics,SUM(amount_with_k)::numeric AS amount_with_k
+        FROM calc_ost GROUP BY s_ts,mnemonics
+    ),
+    ost_priority AS (
+        SELECT o.s_ts,o.amount_with_k,o.mnemonics,
+               ROW_NUMBER() OVER (ORDER BY
+                   CASE o.s_ts
+                       WHEN 's_dd' THEN 1 WHEN 's_vosp' THEN 2
+                       WHEN 's_mgd' THEN 3 WHEN 's_vznos' THEN 4 ELSE 5 END,
+                   o.mnemonics) AS priority
+        FROM calc_ost_by_type o
+    ),
+    -- Существующий рекурсивный write_off: сохранён по снимкам.
+    write_off AS (
+        SELECT o.priority,o.s_ts,o.amount_with_k,o.mnemonics,
+               cp.s_vypl_per*cp1.k4 AS payment_before,
+               LEAST(o.amount_with_k,GREATEST(cp.s_vypl_per*cp1.k4,0)) AS written_off,
+               GREATEST(o.amount_with_k-
+                   LEAST(o.amount_with_k,GREATEST(cp.s_vypl_per*cp1.k4,0)),0) AS amount_after,
+               GREATEST(cp.s_vypl_per*cp1.k4-o.amount_with_k,0) AS payment_left
+        FROM ost_priority o CROSS JOIN calc_params cp CROSS JOIN coeff_params cp1
+        WHERE o.priority=1
+        UNION ALL
+        SELECT o.priority,o.s_ts,o.amount_with_k,o.mnemonics,
+               w.payment_left AS payment_before,
+               LEAST(o.amount_with_k,GREATEST(w.payment_left,0)) AS written_off,
+               GREATEST(o.amount_with_k-
+                   LEAST(o.amount_with_k,GREATEST(w.payment_left,0)),0) AS amount_after,
+               GREATEST(w.payment_left-o.amount_with_k,0) AS payment_left
+        FROM write_off w JOIN ost_priority o ON o.priority=w.priority+1
+    ),
+    write_off_json AS (
+        SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    's_ts',w.s_ts,'mnemonics',w.mnemonics,
+                    'amount_before',w.amount_with_k,
+                    'payment_before',w.payment_before,
+                    'written_off',w.written_off,
+                    'amount_after_kf_d',COALESCE((
+                        SELECT r.pension FROM actuary.round_calc_res(
+                            v_round_type,w.amount_after*cp.kf,v_service_type) r
+                    ),0),
+                    'amount_after',w.amount_after,'payment_left',w.payment_left
+                ) ORDER BY w.priority),'[]'::jsonb) AS write_off_json
+        FROM write_off w CROSS JOIN coeff_params cp
+    ),
+    calc_vykup AS (
+        SELECT (GREATEST(0,
+                   cp1.k1*COALESCE(cp.s_vznos,0)
+                 + cp1.k2*(COALESCE(cp.s_dd,0)+COALESCE(cp.s_vosp,0))
+                 + cp1.k3*COALESCE(cp.s_mgd,0)
+                 - cp1.k4*COALESCE(cp.s_vypl,0)
+                 - cp1.k4*COALESCE(cp.s_perevod,0)) * cp1.kf)::numeric AS s_vykup
+        FROM calc_params cp CROSS JOIN coeff_params cp1
+    ),
+    -- ДОБАВЛЕНО S_SR: независимая база без k1/k2/k3/k4/kf и без доли D.
+    -- Выкупную сумму берём из существующего calc_vykup; write_off не изменяем.
+    -- При наличии в учётной системе специального определения страхового резерва
+    -- формулу sr_raw_balance нужно сверить с этим определением на тестовых договорах.
+    sr_npo_prepare AS (
+        SELECT GREATEST(0,
+                    cp.s_vznos+cp.s_dd+cp.s_mgd+cp.s_vosp
+                    -cp.s_vypl-cp.s_perevod)::numeric AS raw_balance,
+               cp.s_vznos,cp.s_dd,cp.s_mgd,cp.s_vosp,cp.s_vypl,cp.s_perevod
+        FROM calc_params cp
+    ),
+    -- ДОБАВЛЕНО S_SR: положительная разница, D не применяется.
+    sr_npo AS (
+        SELECT GREATEST(0,sr.raw_balance-COALESCE(cv.s_vykup,0))::numeric AS s_sr,
+               sr.raw_balance,cv.s_vykup
+        FROM sr_npo_prepare sr CROSS JOIN calc_vykup cv
+    )
+    SELECT
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cv.s_vykup,v_service_type) r),0)::numeric,
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cp.s_vznos,v_service_type) r),0)::numeric,
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cp.s_dd,v_service_type) r),0)::numeric,
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cp.s_mgd,v_service_type) r),0)::numeric,
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cp.s_vosp,v_service_type) r),0)::numeric,
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cp.s_vypl,v_service_type) r),0)::numeric,
+        COALESCE((SELECT r.pension FROM actuary.round_calc_res(
+            v_round_type,cp.s_perevod,v_service_type) r),0)::numeric,
+        NULL::numeric AS s_finrez,
+        COALESCE(cp1.k1,0)::numeric,
+        COALESCE(cp1.k2,0)::numeric,
+        COALESCE(cp1.k3,0)::numeric,
+        COALESCE(cp1.k4,0)::numeric,
+        COALESCE(cp1.kf,0)::numeric,
+        NULL::numeric AS d,
+        jsonb_build_object(
+            'credit_included',COALESCE(tcc.credit_included_json,'[]'::jsonb),
+            'credit_not_included',COALESCE(nitcj.credit_not_included_json,'[]'::jsonb),
+            'debit_included',COALESCE(tcd.debit_included_json,'[]'::jsonb),
+            'debit_not_included',COALESCE(nitdj.debit_not_included_json,'[]'::jsonb),
+            'write_off',woj.write_off_json,
+            -- ДОБАВЛЕНО S_SR: отдельная детализация страхового резерва.
+            's_sr',jsonb_build_object(
+                'amount',COALESCE(sr.s_sr,0),
+                'raw_balance',COALESCE(sr.raw_balance,0),
+                's_vykup_without_share',COALESCE(sr.s_vykup,0),
+                'share_applied',false),
+            'exception',jsonb_build_object('error',cp1.details_json)
+        )::jsonb AS details_json
+    FROM calc_params cp
+    CROSS JOIN coeff_params cp1
+    CROSS JOIN calc_vykup cv
+    CROSS JOIN write_off_json woj
+    CROSS JOIN sr_npo sr -- ДОБАВЛЕНО S_SR
+    LEFT JOIN trans_calc_credit tcc ON true
+    LEFT JOIN trans_calc_debit tcd ON true
+    LEFT JOIN not_included_trans_credit_json nitcj ON true
+    LEFT JOIN not_included_trans_debit_json nitdj ON true;
+END IF;
